@@ -4,8 +4,8 @@ Working agreement for anyone (human or agent) working on `chaff-tg`.
 
 ## Commands
 
-- `bun test` — run the suite (includes `scripts/check-tests.ts`, which fails
-  the run if zero test files are discovered). **Must be green before every commit.**
+- `bun run test` — run the suite (equals `bun test && bun scripts/check-tests.ts`,
+  which fails the run if zero test files are discovered). **Must be green before every commit.**
 - `bun run typecheck` — `bunx tsc --noEmit`, must be clean before every commit.
 - `bunx prettier --write .` — format before every commit; CI checks with
   `bun run format:check`.
