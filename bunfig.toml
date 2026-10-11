@@ -1,0 +1,8 @@
+# Bun configuration.
+#
+# NOTE (plan/notes.md): `bun build --compile` ignores anything in this file,
+# so nothing here may be load-bearing at runtime. Keep the [test] section
+# free of preloads and plugins — use the `Bun.build` API when a preload or
+# plugin becomes necessary.
+
+[test]

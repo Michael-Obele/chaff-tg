@@ -1,0 +1,31 @@
+{
+  "name": "chaff-tg",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "bin": {
+    "chaff": "./src/cli/index.ts"
+  },
+  "scripts": {
+    "test": "bun test && bun scripts/check-tests.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "format": "bunx prettier --write .",
+    "format:check": "bunx prettier --check .",
+    "build": "bun scripts/build.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "@mtcute/bun": "0.32.4",
+    "picocolors": "^1.1.1",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "@opentui/core": "0.6.0",
+    "@types/bun": "^1.4.2",
+    "prettier": "^3.9.10",
+    "typescript": "^7.0.2"
+  }
+}
