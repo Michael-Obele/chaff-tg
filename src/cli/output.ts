@@ -5,13 +5,18 @@
  * Every write in `src/cli` goes through the writers on `CliContext`, never the
  * real console, so a test can capture every byte a command produces and
  * `--out` is the only path that touches the filesystem. This module keeps the
- * three ways a command emits text in one place: the primary output (`--json` /
- * `--csv` / `--md` / table, and the `--out` copy), a note that `--quiet`
- * silences, and a per-chat line that `-v/--verbose` turns on.
+ * four ways a command emits text in one place: the primary output (`--json` /
+ * `--csv` / `--md` / table, and the `--out` copy), a streamed `line` for the
+ * table it builds itself, a note that `--quiet` silences, and a per-chat line
+ * that `-v/--verbose` turns on.
  *
- * `--out` is written synchronously and rewritten on every call: a command has
- * one primary output, so "as well as stdout" means the file holds exactly the
- * bytes stdout received, not a growing log.
+ * `--out` receives exactly what stdout received, from the same call: a command
+ * has one primary output, so "as well as stdout" means the file holds the same
+ * bytes, not a growing log. That is why the payload channel is single-shot — a
+ * second document would append to stdout while the file kept only the last
+ * write, and stdout would stop being the bytes the file holds — and why the
+ * `line` channel (a live table, written row by row) is legal only when stdout
+ * is the table itself: no machine format, and no `--out` to leave behind.
  *
  * A machine format is a promise about stdout: `plan/cli.md` says `--json` makes
  * every command print machine readable output, so under `--json`, `--csv` or
@@ -108,8 +113,23 @@ function chatterChannel(format: OutputFormat, streams: OutputStreams): OutputWri
  * because it is never offered one.
  */
 export interface CommandOutput {
-  /** Render `table` in the resolved format; write it to stdout and to `--out`'s file. */
+  /**
+   * Render `table` in the resolved format and write it to stdout and, when
+   * `--out` is set, to that file: the same bytes, in the same call.
+   *
+   * Single-shot. A command has exactly one document, so a second call is a
+   * programming error and throws rather than appending a second document to
+   * stdout while `--out` keeps only the last write.
+   */
   payload<Row>(table: Table<Row>): void;
+  /**
+   * One line of a live, human-readable stream (a table built row by row),
+   * written to stdout as it happens. Legal only when stdout *is* the table:
+   * under `--json`/`--csv`/`--md` it throws, so a command can never interleave
+   * rows with a machine document, and with `--out` it throws too, because a
+   * line the file never saw would leave stdout and the file disagreeing.
+   */
+  line(text: string): void;
   /** A human line `--quiet` silences, routed by the bound format. */
   note(text: string): void;
   /** A per-chat line, printed only under `-v/--verbose`, routed by the same rule. */
@@ -130,9 +150,35 @@ export interface CommandOutput {
 export function bindOutput(streams: OutputStreams, flags: OutputSinkFlags): CommandOutput {
   const format = outputFormat(flags);
   const chatter = chatterChannel(format, streams);
+  // Per invocation, not per module: each bound sink gets its own document, so a
+  // second `runCli` (or a second command in an in-process caller) is unaffected.
+  let payloadWritten = false;
   return {
     payload<Row>(table: Table<Row>): void {
+      if (payloadWritten) {
+        throw new Error(
+          "payload() was called twice by one command: a command has exactly one " +
+            "document, and a second one would be appended to stdout while --out " +
+            "kept only the last write",
+        );
+      }
+      payloadWritten = true;
       emitOutput(streams.stdout, flags.out, renderOutput(format, table));
+    },
+    line(text: string): void {
+      if (format !== "table") {
+        throw new Error(
+          `line() is not available under --${format}: stdout carries the ` +
+            "machine document and nothing else, so emit it through payload()",
+        );
+      }
+      if (flags.out !== null) {
+        throw new Error(
+          "line() is not available with --out: the file holds exactly the bytes " +
+            "stdout received, so a line it never saw would make the two disagree",
+        );
+      }
+      streams.stdout.write(text);
     },
     note(text: string): void {
       if (!flags.quiet) chatter.write(text);

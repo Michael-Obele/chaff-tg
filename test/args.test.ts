@@ -355,15 +355,21 @@ describe("runCli: a command cannot choose its stream", () => {
   const probe: Command = {
     name: "probe",
     summary: "Emit a payload and two chatter lines",
-    async run(_ctx, _args, out) {
+    async run(ctx) {
       // The sink is the only writer a command can reach, and no channel takes a
       // format, so the routing cannot be re-opened from inside a command.
-      for (const channel of [out.payload, out.note, out.verbose, out.error]) {
+      for (const channel of [
+        ctx.out.payload,
+        ctx.out.line,
+        ctx.out.note,
+        ctx.out.verbose,
+        ctx.out.error,
+      ]) {
         expect(channel.length).toBe(1);
       }
-      out.payload(PROBE_TABLE);
-      out.note("probe: note\n");
-      out.verbose("probe: verbose\n");
+      ctx.out.payload(PROBE_TABLE);
+      ctx.out.note("probe: note\n");
+      ctx.out.verbose("probe: verbose\n");
       return EXIT.OK;
     },
   };
@@ -394,7 +400,39 @@ describe("runCli: a command cannot choose its stream", () => {
     expect(io.stderr.text()).toContain("not implemented");
   });
 
-  test("a command's context has no raw writer (the type is the assertion)", () => {
+  test("a command's context has no raw writer, and not only by type", async () => {
+    const io = capture();
+    let seen: CommandContext | undefined;
+    const spy: Command = {
+      name: "probe",
+      summary: "Record the context it was handed",
+      async run(ctx) {
+        seen = ctx;
+        return EXIT.OK;
+      },
+    };
+
+    expect(await runCli({ ...io.ctx, argv: ["probe"] }, [spy])).toBe(EXIT.OK);
+
+    // The old `Omit<CliContext, "stdout" | "stderr">` was a promise the type
+    // checker kept and the object broke: `runCli` handed the command the whole
+    // `CliContext`, so both writers were own properties of it, one cast away.
+    // These assertions are RED on that shape and RED on any `Omit`.
+    const ctx = seen as CommandContext;
+    expect(Object.keys(ctx).sort()).toEqual(["args", "env", "isTTY", "now", "out"]);
+    expect(Object.hasOwn(ctx, "stdout")).toBe(false);
+    expect(Object.hasOwn(ctx, "stderr")).toBe(false);
+    expect("stdout" in ctx).toBe(false);
+    expect("stderr" in ctx).toBe(false);
+    expect("argv" in ctx).toBe(false);
+    expect((ctx as unknown as { stdout?: unknown }).stdout).toBeUndefined();
+    expect((ctx as unknown as { stderr?: unknown }).stderr).toBeUndefined();
+    expect(ctx.args.command).toBe("probe");
+    expect(ctx.isTTY).toBe(false);
+    expect(ctx.now()).toEqual(new Date("2026-10-11T13:04:00Z"));
+  });
+
+  test("the type has no `stdout`, so a stray write does not compile (belt and braces)", () => {
     const read = (ctx: CommandContext): unknown => {
       // @ts-expect-error a command context deliberately has no `stdout`.
       return ctx.stdout;

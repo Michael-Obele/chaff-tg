@@ -236,6 +236,85 @@ describe("chatter stays off the machine payload", () => {
   });
 });
 
+/**
+ * A command has one primary output. The sink enforces that instead of trusting
+ * a command to remember it: a second `payload` would append a second document
+ * to stdout while `--out` kept only the last write, so stdout would stop being
+ * the bytes the file holds (and `--json` would stop parsing). A command that
+ * streams rows instead has the `line` channel, which is legal only when stdout
+ * is the table itself.
+ */
+describe("the payload channel is single-shot and never diverges from --out", () => {
+  test("a second payload call throws instead of appending a second document", () => {
+    const stdout = sink();
+    const out = bindOutput({ stdout, stderr: sink() }, parseArgs(["--json", "list"]).flags);
+
+    out.payload(TABLE);
+    expect(() => out.payload(TABLE)).toThrow(/payload/);
+
+    expect(stdout.text()).toBe(renderJson(TABLE));
+    expect(JSON.parse(stdout.text())).toHaveLength(3);
+  });
+
+  test("stdout and the --out file hold the same bytes, written in the same call", () => {
+    const stdout = sink();
+    const file = join(mkdtempSync(join(tmpdir(), "chaff-out-")), "list.json");
+    const out = bindOutput(
+      { stdout, stderr: sink() },
+      parseArgs(["--json", "--out", file, "list"]).flags,
+    );
+
+    out.payload(TABLE);
+
+    expect(stdout.text()).toBe(renderJson(TABLE));
+    expect(readFileSync(file, "utf8")).toBe(stdout.text());
+    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(3);
+  });
+
+  test("the single-shot rule is per invocation, not one flag for the whole module", () => {
+    const first = sink();
+    const second = sink();
+    bindOutput({ stdout: first, stderr: sink() }, parseArgs(["list"]).flags).payload(TABLE);
+    bindOutput({ stdout: second, stderr: sink() }, parseArgs(["list"]).flags).payload(TABLE);
+
+    expect(first.text()).toBe(renderTable(TABLE));
+    expect(second.text()).toBe(renderTable(TABLE));
+  });
+
+  test("a line write under a machine format throws instead of interleaving", () => {
+    for (const flag of ["--json", "--csv", "--md"]) {
+      const stdout = sink();
+      const out = bindOutput({ stdout, stderr: sink() }, parseArgs([flag, "list"]).flags);
+
+      expect(() => out.line("id=1\n")).toThrow(/line\(\)/);
+      expect(stdout.text()).toBe("");
+    }
+  });
+
+  test("a line write with --out throws: a line outside the file would diverge", () => {
+    const stdout = sink();
+    const out = bindOutput(
+      { stdout, stderr: sink() },
+      parseArgs(["--out", "list.txt", "list"]).flags,
+    );
+
+    expect(() => out.line("row 1\n")).toThrow(/--out/);
+    expect(stdout.text()).toBe("");
+  });
+
+  test("table mode still streams lines, and they are stdout's own output", () => {
+    const stdout = sink();
+    const stderr = sink();
+    const out = bindOutput({ stdout, stderr }, parseArgs(["-v", "list"]).flags);
+
+    out.line("row 1\n");
+    out.note("Found 2 chats\n");
+
+    expect(stdout.text()).toBe("row 1\nFound 2 chats\n");
+    expect(stderr.text()).toBe("");
+  });
+});
+
 interface Sink {
   write(s: string): unknown;
   text(): string;

@@ -17,12 +17,13 @@
  * commands; a stub says so on stderr and exits 1 (`EXIT.ERROR`), because "not
  * built yet" is an unexpected error, not a usage mistake.
  *
- * A command never sees a raw writer. `runCli` resolves the output format and
- * binds it to the two writers once per invocation (`output.ts`, `bindOutput`),
- * then hands the command that sink and nothing else: the command says *what* it
- * emits and the front end decides *where* it goes. A machine format therefore
- * cannot be corrupted from inside a command — there is no `ctx.stdout` to write
- * to, and no channel on the sink takes a format to override.
+ * A command never sees a raw writer, and that is a fact about the object, not a
+ * promise the compiler keeps. `runCli` resolves the output format and binds it
+ * to the two writers once per invocation (`output.ts`, `bindOutput`), then
+ * builds a fresh `CommandContext` out of the parsed args, that sink, and the
+ * environment, clock and TTY flag — never the `CliContext` itself. The two
+ * writers stay in `runCli`'s own frame, so there is no `ctx.stdout` to write to
+ * even with a cast, and no channel on the sink takes a format to override.
  *
  * Failures are mapped in one place: bad usage exits 2, a classified
  * `ChaffError` exits with the code the core's taxonomy already chose, and
@@ -73,19 +74,33 @@ export interface CliContext {
 }
 
 /**
- * What a command may touch: everything `runCli` has, minus the two raw writers.
- * The payload can only leave through the `CommandOutput` sink, which `runCli`
- * already bound to a format, so a command cannot pick a stream of its own.
+ * What a command is handed: a new object, built per invocation, holding only
+ * what a command needs. It is deliberately not `Omit<CliContext, …>`, because
+ * an `Omit` is a promise about a *type* while the value is still whatever was
+ * passed: the front end used to hand over the whole `CliContext`, so the two
+ * writers sat on the object and one `as CliContext` reached them. This object
+ * is built without them, so there is nothing for a cast to find.
  */
-export type CommandContext = Omit<CliContext, "stdout" | "stderr">;
+export interface CommandContext {
+  /** The parsed command line; `args.command` names the command being run. */
+  readonly args: ParsedArgs;
+  /** The sink `runCli` bound for this invocation: the only writer a command may use. */
+  readonly out: CommandOutput;
+  /** The environment, so a command never reads `process.env` itself. */
+  readonly env: Record<string, string | undefined>;
+  /** The clock, so a command never reads the system time itself. */
+  now(): Date;
+  /** Whether stdout is a terminal, which decides prompts and the checklist. */
+  readonly isTTY: boolean;
+}
 
 /** One command: how it is listed in the help, and what it does. */
 export interface Command extends CommandBrief {
   /**
-   * Returns the process exit code; never calls `process.exit`. `out` is the
-   * sink bound for this invocation, and the only writer a command may use.
+   * Returns the process exit code; never calls `process.exit`. `ctx` carries the
+   * parsed arguments and the sink bound for this invocation, and nothing else.
    */
-  run(ctx: CommandContext, args: ParsedArgs, out: CommandOutput): Promise<number>;
+  run(ctx: CommandContext): Promise<number>;
 }
 
 /** A command that has not been built yet. Tasks 11-14 replace these rows. */
@@ -93,8 +108,8 @@ function stub(name: string, summary: string): Command {
   return {
     name,
     summary,
-    async run(_ctx, _args, out) {
-      out.error(`${name} is not implemented yet.\n`);
+    async run(ctx) {
+      ctx.out.error(`${name} is not implemented yet.\n`);
       return EXIT.ERROR;
     },
   };
@@ -179,8 +194,19 @@ export async function runCli(
   // the same routing rule, and the format is not a command's to choose.
   const out = bindOutput(ctx, args.flags);
 
+  // And one context per invocation, built here rather than passed along: the
+  // writers are not copied into it, so a command has no stream to reach, cast or
+  // no cast. `argv` stays out for the same reason — a command has `args`.
+  const commandContext: CommandContext = {
+    args,
+    out,
+    env: ctx.env,
+    now: ctx.now,
+    isTTY: ctx.isTTY,
+  };
+
   try {
-    return await command.run(ctx, args, out);
+    return await command.run(commandContext);
   } catch (error) {
     ctx.stderr.write(`${messageOf(error)}\n`);
     return exitCodeOf(error);
