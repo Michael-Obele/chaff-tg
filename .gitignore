@@ -1,0 +1,17 @@
+# Planning material stays local: it travels with this machine, not with git.
+# The plan lives in plan/ and is deliberately untracked (see plan/README.md).
+plan/
+
+# A leaked session file is a leaked Telegram account. Never commit it.
+*.session
+*.session-shm
+*.session-wal
+*.session.json
+
+# Build and dependency output
+dist/
+node_modules/
+
+# Editor and OS noise
+.DS_Store
+*.log
