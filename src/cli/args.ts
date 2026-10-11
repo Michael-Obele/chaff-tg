@@ -20,10 +20,12 @@
  *   (`plan/cli.md`: "Requires `--yes`"). Failing at parse time means nothing
  *   downstream has to remember the rule.
  *
- * `--dry-run` is accepted and needs no conflict rule: it is the flag for "do
- * not act", so its only effect is to clear `--yes`. Passing both is not an
- * error, but the safe reading wins, and `selection.yes` is the one place that
- * decision is made.
+ * `--yes` and `--dry-run` are the two sides of the one decision this CLI exists
+ * to get right, so they are a conflict rule rather than a fold: `--yes`
+ * authorises the real thing, `--dry-run` rehearses it, and asking for both is a
+ * line the tool cannot act on. Refusing it keeps `provided` honest — every name
+ * in that set is a flag the user actually typed, so `provided.has("yes")` and
+ * `selection.yes` can never disagree about whether a run may act.
  *
  * Values are validated here (a whole number, a range, a known chat type) so a
  * command receives data it can trust, and the message names the flag the user
@@ -63,8 +65,8 @@ export interface GlobalFlags {
   /** `-V/--version`: show the version and commit. */
   version: boolean;
   /**
-   * `--dry-run` was given. Always safe to act on: it is already folded into
-   * `selection.yes`, which is `false` whenever this is `true`.
+   * `--dry-run` was given: a rehearsal. The conflict table refuses it beside
+   * `--yes`, so whenever this is `true`, `selection.yes` is `false`.
    */
   dryRun: boolean;
 }
@@ -76,8 +78,9 @@ export interface Selection {
   /** `--from <file>`: replay a manifest written by `chaff report`. */
   from: string | null;
   /**
-   * `--yes`: actually perform the leaves. Already folded with `--dry-run`, so
-   * `true` means "this run may act".
+   * `--yes`: actually perform the leaves. `true` means "this run may act", and
+   * it agrees with `provided.has("yes")` because `--dry-run` cannot be present
+   * beside it.
    */
   yes: boolean;
   /** `--force`: continue past the first failure instead of stopping. */
@@ -102,6 +105,9 @@ export interface ParsedArgs {
    * caller can tell "the user asked for 50" from "50 is the default" — which
    * is exactly what config-file precedence needs (`plan/cli.md`, "Config
    * file": values there are defaults that flags override).
+   *
+   * Only flags the user typed appear here, and it is handed back as a fresh
+   * copy, so this set is always safe to read as "what the command line said".
    */
   provided: ReadonlySet<string>;
 }
@@ -677,6 +683,11 @@ export const CONFLICT_RULES: readonly ConflictRule[] = [
     message: "--quiet and --verbose contradict each other; pick one",
   },
   {
+    kind: "mutual",
+    flags: ["yes", "dry-run"],
+    message: "--yes and --dry-run contradict each other: --dry-run rehearses, --yes authorises",
+  },
+  {
     kind: "at-most-one",
     flags: ["json", "csv", "md"],
     message: "--json, --csv and --md are separate output formats; pick one",
@@ -782,15 +793,16 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
 
   checkConflicts(builder.provided);
 
-  // `--dry-run` is the flag for "do not act", so it clears `--yes` rather than
-  // fighting it: the safe direction wins and the decision lives here alone.
-  builder.selection.yes = builder.provided.has("yes") && !builder.provided.has("dry-run");
+  // `--yes` is the only thing that makes a run act, and the conflict table has
+  // already refused it beside `--dry-run`, so no fold is needed here: the flag
+  // the user typed is the flag `provided` holds and the value `selection` holds.
+  builder.selection.yes = builder.provided.has("yes");
 
   return {
     command,
     flags: builder.flags,
     filters: builder.filters,
     selection: builder.selection,
-    provided: builder.provided,
+    provided: new Set(builder.provided),
   };
 }

@@ -126,14 +126,26 @@ describe("parseArgs: selection and pacing", () => {
     expect(selection.delayMs).toBe(DEFAULT_CONFIG.delayMs);
   });
 
-  test("--dry-run is accepted, and --yes is implied off", () => {
-    expect(parseArgs(["--dry-run"]).flags.dryRun).toBe(true);
-    expect(parseArgs(["--dry-run"]).selection.yes).toBe(false);
+  test("--dry-run is a rehearsal: provided and selection.yes both stay false", () => {
+    const args = parseArgs(["--dry-run"]);
+    expect(args.flags.dryRun).toBe(true);
+    expect(args.selection.yes).toBe(false);
+    expect(args.provided.has("yes")).toBe(false);
+    expect([...args.provided]).toEqual(["dry-run"]);
   });
 
-  test("--dry-run beats --yes: the safe direction wins", () => {
-    expect(parseArgs(["--yes", "--dry-run"]).selection.yes).toBe(false);
-    expect(parseArgs(["--yes"]).selection.yes).toBe(true);
+  test("--yes alone is a live run: provided and selection.yes are both true", () => {
+    const args = parseArgs(["--yes"]);
+    expect(args.selection.yes).toBe(true);
+    expect(args.provided.has("yes")).toBe(true);
+    expect(args.flags.dryRun).toBe(false);
+  });
+
+  test("--yes with --dry-run is contradictory, so it is a usage error", () => {
+    const error = captureError(() => parseArgs(["--yes", "--dry-run"]));
+    expect(error).toBeInstanceOf(UsageError);
+    expect((error as UsageError).exitCode).toBe(EXIT.USAGE);
+    expect((error as UsageError).message).toContain("--dry-run");
   });
 });
 
@@ -205,6 +217,7 @@ describe("parseArgs: conflicts and bad usage exit 2", () => {
     { name: "--json with --csv", argv: ["--json", "--csv"] },
     { name: "--csv with --md", argv: ["--csv", "--md"] },
     { name: "--json with --md", argv: ["--json", "--md"] },
+    { name: "--yes with --dry-run", argv: ["--yes", "--dry-run"] },
     { name: "--select without --yes", argv: ["--select", "-1"] },
   ];
 
@@ -255,24 +268,40 @@ describe("runCli: dispatch, version, help, and stubs", () => {
     expect(CLI_COMMIT).toBe("dev");
   });
 
-  test("--help prints usage to stderr and exits 2", async () => {
+  test("--help writes usage to stdout and exits 0", async () => {
     const io = capture();
     const code = await runCli({ ...io.ctx, argv: ["--help"] });
-    expect(code).toBe(EXIT.USAGE);
-    expect(io.stderr.text()).toContain("--keyword");
-    expect(io.stdout.text()).toBe("");
+    expect(code).toBe(EXIT.OK);
+    expect(io.stdout.text()).toContain("--keyword");
+    expect(io.stderr.text()).toBe("");
+  });
+
+  test("-h is the same: usage on stdout, exit 0", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: ["-h"] })).toBe(EXIT.OK);
+    expect(io.stdout.text()).toContain("Commands");
+    expect(io.stderr.text()).toBe("");
   });
 
   test("no command prints usage to stderr and exits 2", async () => {
     const io = capture();
     expect(await runCli({ ...io.ctx, argv: [] })).toBe(EXIT.USAGE);
     expect(io.stderr.text()).toContain("Commands");
+    expect(io.stdout.text()).toBe("");
   });
 
   test("an unknown command prints usage to stderr and exits 2", async () => {
     const io = capture();
     expect(await runCli({ ...io.ctx, argv: ["nope"] })).toBe(EXIT.USAGE);
     expect(io.stderr.text()).toContain(`unknown command "nope"`);
+    expect(io.stdout.text()).toBe("");
+  });
+
+  test("a conflicting flag exits 2 with usage on stderr and nothing on stdout", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: ["--yes", "--dry-run"] })).toBe(EXIT.USAGE);
+    expect(io.stderr.text()).toContain("--yes and --dry-run contradict");
+    expect(io.stdout.text()).toBe("");
   });
 
   test("a bad flag exits 2 with the message on stderr and nothing on stdout", async () => {
@@ -286,7 +315,7 @@ describe("runCli: dispatch, version, help, and stubs", () => {
     const io = capture();
     await runCli({ ...io.ctx, argv: ["--help"] });
     for (const command of COMMANDS) {
-      expect(io.stderr.text()).toContain(command.name);
+      expect(io.stdout.text()).toContain(command.name);
     }
   });
 

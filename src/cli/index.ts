@@ -115,9 +115,11 @@ function exitCodeOf(error: unknown): number {
  * Run one command line and return its exit code.
  *
  * `--version` wins over everything: it has to work even when the rest of the
- * line is nonsense, which is what a bug report needs. `--help`, a missing
- * command and an unknown command all print the usage text to stderr and exit 2
- * (`plan/cli.md`, "Exit codes": 2 is the code for a line the tool cannot act on).
+ * line is nonsense, which is what a bug report needs. `--help` is a request for
+ * information rather than a failure, so it prints the usage text to stdout and
+ * exits 0 (`plan/cli.md`, "Exit codes": 0 is "Success"). The lines the tool
+ * cannot act on — no command, an unknown command, a flag that is unknown or
+ * conflicting — are the ones that print the usage text to stderr and exit 2.
  */
 export async function runCli(ctx: CliContext): Promise<number> {
   let args: ParsedArgs;
@@ -133,7 +135,12 @@ export async function runCli(ctx: CliContext): Promise<number> {
     return EXIT.OK;
   }
 
-  if (args.flags.help || args.command === null) {
+  if (args.flags.help) {
+    ctx.stdout.write(renderUsage(COMMANDS));
+    return EXIT.OK;
+  }
+
+  if (args.command === null) {
     ctx.stderr.write(renderUsage(COMMANDS));
     return EXIT.USAGE;
   }

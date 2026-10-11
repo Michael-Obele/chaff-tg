@@ -12,6 +12,14 @@
  * `--out` is written synchronously and rewritten on every call: a command has
  * one primary output, so "as well as stdout" means the file holds exactly the
  * bytes stdout received, not a growing log.
+ *
+ * A machine format is a promise about stdout: `plan/cli.md` says `--json` makes
+ * every command print machine readable output, so under `--json`, `--csv` or
+ * `--md` stdout carries the payload and nothing else, and the human chatter — a
+ * note, a per-chat line — moves to stderr. Without a machine format the chatter
+ * stays on stdout beside the table, as it always has. The routing lives inside
+ * the chatter functions rather than in the caller, because a caller that forgets
+ * is a caller that corrupts the document.
  */
 import { writeFileSync } from "node:fs";
 import type { Table } from "./render/columns";
@@ -31,9 +39,15 @@ export interface OutputFlags {
   out: string | null;
 }
 
-/** Anything that can receive a written chunk, i.e. `CliContext["stdout"]`. */
+/** Anything that can receive a written chunk, i.e. a `CliContext` writer. */
 export interface OutputWriter {
   write(s: string): unknown;
+}
+
+/** The two writers a command may write to, as `CliContext` supplies them. */
+export interface OutputStreams {
+  stdout: OutputWriter;
+  stderr: OutputWriter;
 }
 
 /** The format the flags asked for. Mutually exclusive formats are a parse error. */
@@ -64,16 +78,31 @@ export function emitOutput(stdout: OutputWriter, out: string | null, text: strin
   if (out !== null) writeFileSync(out, text);
 }
 
+/**
+ * The channel human chatter goes to: stderr under a machine format, stdout
+ * otherwise. Under a machine format nothing but the payload reaches stdout, so
+ * the document stays parseable no matter what the command says along the way.
+ */
+function chatterChannel(format: OutputFormat, streams: OutputStreams): OutputWriter {
+  return format === "table" ? streams.stdout : streams.stderr;
+}
+
 /** A line a command prints but `--quiet` silences: a count, a path, a warning. */
-export function noteOutput(stdout: OutputWriter, flags: { quiet: boolean }, text: string): void {
-  if (!flags.quiet) stdout.write(text);
+export function noteOutput(
+  format: OutputFormat,
+  streams: OutputStreams,
+  flags: { quiet: boolean },
+  text: string,
+): void {
+  if (!flags.quiet) chatterChannel(format, streams).write(text);
 }
 
 /** A per-chat line, printed only under `-v/--verbose`. */
 export function verboseOutput(
-  stdout: OutputWriter,
+  format: OutputFormat,
+  streams: OutputStreams,
   flags: { verbose: boolean },
   text: string,
 ): void {
-  if (flags.verbose) stdout.write(text);
+  if (flags.verbose) chatterChannel(format, streams).write(text);
 }
