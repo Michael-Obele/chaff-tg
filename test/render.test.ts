@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Column, Table } from "../src/cli/render/columns";
 import { renderCsv } from "../src/cli/render/csv";
-import { renderJson } from "../src/cli/render/json";
+import { renderJson, renderJsonValue } from "../src/cli/render/json";
 import { renderMd } from "../src/cli/render/md";
 import { renderTable } from "../src/cli/render/table";
 import { parseArgs } from "../src/cli/args";
@@ -312,6 +312,67 @@ describe("the payload channel is single-shot and never diverges from --out", () 
 
     expect(stdout.text()).toBe("row 1\nFound 2 chats\n");
     expect(stderr.text()).toBe("");
+  });
+});
+
+/**
+ * `document` is the primary output for a command whose JSON is not the bare
+ * array of rows: `plan/cli.md` says `--json` prints "one object per row or one
+ * array", and `chaff list` prints `{ "chats": [ … ] }`. The two halves travel
+ * together, so the machine document and the table a person reads always
+ * describe the same run — and the channel keeps every guarantee `payload` has,
+ * including being the same one-shot primary output.
+ */
+describe("the document channel carries a JSON shape that is not the table", () => {
+  const DOCUMENT = { chats: [{ id: -1001 }] };
+
+  test("under --json it prints its own value, pretty-printed", () => {
+    const stdout = sink();
+    bindOutput({ stdout, stderr: sink() }, parseArgs(["--json", "list"]).flags).document({
+      json: DOCUMENT,
+      table: TABLE,
+    });
+
+    expect(stdout.text()).toBe(renderJsonValue(DOCUMENT));
+    expect(JSON.parse(stdout.text())).toEqual(DOCUMENT);
+  });
+
+  test("under the human formats it renders the table, envelope and all dropped", () => {
+    const asTable = sink();
+    bindOutput({ stdout: asTable, stderr: sink() }, parseArgs(["list"]).flags).document({
+      json: DOCUMENT,
+      table: TABLE,
+    });
+    expect(asTable.text()).toBe(renderTable(TABLE));
+
+    const asCsv = sink();
+    bindOutput({ stdout: asCsv, stderr: sink() }, parseArgs(["--csv", "list"]).flags).document({
+      json: DOCUMENT,
+      table: TABLE,
+    });
+    expect(asCsv.text()).toBe(renderCsv(TABLE));
+  });
+
+  test("stdout and the --out file hold the same document", () => {
+    const stdout = sink();
+    const file = join(mkdtempSync(join(tmpdir(), "chaff-doc-")), "list.json");
+    bindOutput(
+      { stdout, stderr: sink() },
+      parseArgs(["--json", "--out", file, "list"]).flags,
+    ).document({ json: DOCUMENT, table: TABLE });
+
+    expect(stdout.text()).toBe(renderJsonValue(DOCUMENT));
+    expect(readFileSync(file, "utf8")).toBe(stdout.text());
+  });
+
+  test("payload and document are one primary output: a second write of either throws", () => {
+    const stdout = sink();
+    const out = bindOutput({ stdout, stderr: sink() }, parseArgs(["list"]).flags);
+
+    out.document({ json: DOCUMENT, table: TABLE });
+    expect(() => out.payload(TABLE)).toThrow(/payload/);
+    expect(() => out.document({ json: DOCUMENT, table: TABLE })).toThrow(/document/);
+    expect(stdout.text()).toBe(renderTable(TABLE));
   });
 });
 

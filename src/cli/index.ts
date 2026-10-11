@@ -32,6 +32,10 @@
  */
 import { ChaffError, EXIT } from "../core/errors";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
+import { NotLoggedInError } from "./client";
+import { doctorCommand } from "./commands/doctor";
+import { listCommand } from "./commands/list";
+import { whoamiCommand } from "./commands/whoami";
 import { bindOutput, type CommandOutput } from "./output";
 import { renderUsage, type CommandBrief } from "./usage";
 
@@ -118,12 +122,12 @@ function stub(name: string, summary: string): Command {
 /** Every command, in the order `plan/cli.md`, "Commands" lists them. */
 export const COMMANDS: readonly Command[] = [
   stub("login", "Ask for the my.telegram.org credentials and store the session"),
-  stub("whoami", "Show the logged in account and where the session file lives"),
-  stub("list", "List dialogs as a table, with filters applied"),
+  whoamiCommand,
+  listCommand,
   stub("report", "Write a review manifest (table, JSON, CSV or markdown)"),
   stub("leave", "Leave the selected chats"),
   stub("journal", "Show what previous runs did"),
-  stub("doctor", "Check the local setup: paths, file modes, and config"),
+  doctorCommand,
   stub("logout", "Delete the local session file"),
   stub("tui", "Open the full screen interface"),
 ];
@@ -134,12 +138,14 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The exit code a thrown value earns. A usage error is 2; a classified failure
- * carries the code the taxonomy already chose for it (`src/core/errors.ts`);
- * anything else is an unexpected error, 1.
+ * The exit code a thrown value earns. A usage error is 2; a local precondition
+ * a command can explain (`NotLoggedInError`) carries the code the plan gives
+ * it, 3; a classified Telegram failure carries the code the taxonomy already
+ * chose (`src/core/errors.ts`); anything else is an unexpected error, 1.
  */
 function exitCodeOf(error: unknown): number {
   if (error instanceof UsageError) return error.exitCode;
+  if (error instanceof NotLoggedInError) return error.exitCode;
   if (error instanceof ChaffError) return error.exitCode;
   return EXIT.ERROR;
 }

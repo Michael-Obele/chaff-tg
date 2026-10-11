@@ -324,12 +324,33 @@ describe("runCli: dispatch, version, help, and stubs", () => {
     }
   });
 
-  test("every command is a stub that exits 1 and says so", async () => {
-    for (const command of COMMANDS) {
+  /**
+   * The commands Tasks 12-14 have not landed yet. Listed by name, so landing
+   * one is a one-line edit here rather than a silently weaker loop.
+   */
+  const NOT_BUILT_YET = ["login", "report", "leave", "journal", "logout", "tui"] as const;
+
+  test("the commands that are not built yet are stubs that exit 1 and say so", async () => {
+    for (const name of NOT_BUILT_YET) {
+      expect(COMMANDS.some((command) => command.name === name)).toBe(true);
       const io = capture();
-      expect(await runCli({ ...io.ctx, argv: [command.name] })).toBe(EXIT.ERROR);
+      expect(await runCli({ ...io.ctx, argv: [name] })).toBe(EXIT.ERROR);
       expect(io.stderr.text()).toContain("not implemented");
     }
+  });
+
+  test("the dispatch table is the command list `plan/cli.md` documents", () => {
+    expect(COMMANDS.map((command) => command.name)).toEqual([
+      "login",
+      "whoami",
+      "list",
+      "report",
+      "leave",
+      "journal",
+      "doctor",
+      "logout",
+      "tui",
+    ]);
   });
 
   test("runCli never returns a code the core does not define", async () => {
@@ -360,6 +381,7 @@ describe("runCli: a command cannot choose its stream", () => {
       // format, so the routing cannot be re-opened from inside a command.
       for (const channel of [
         ctx.out.payload,
+        ctx.out.document,
         ctx.out.line,
         ctx.out.note,
         ctx.out.verbose,
@@ -395,7 +417,7 @@ describe("runCli: a command cannot choose its stream", () => {
 
   test("under --json a command's error line still goes to stderr", async () => {
     const io = capture();
-    expect(await runCli({ ...io.ctx, argv: ["--json", "list"] })).toBe(EXIT.ERROR);
+    expect(await runCli({ ...io.ctx, argv: ["--json", "report"] })).toBe(EXIT.ERROR);
     expect(io.stdout.text()).toBe("");
     expect(io.stderr.text()).toContain("not implemented");
   });
