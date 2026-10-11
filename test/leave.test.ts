@@ -482,6 +482,141 @@ describe("resume", () => {
     expect(second.failures[0]!.error).toContain("USER_NOT_PARTICIPANT");
     journal.close();
   });
+
+  test("a plan that is not the unfinished run's plan starts its own run and leaves the old one alone", async () => {
+    const client = new FakeClient({
+      failures: [{ chatId: -1002, error: fakeRpcError("FLOOD_WAIT_90") }],
+    });
+    const journal = openJournal();
+
+    // Run A plans the first four chats and stops on the flood at -1002.
+    const first = await core.runLeave(
+      client,
+      planOf(CHATS.slice(0, 4)),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(first.planned).toBe(4);
+    expect(first.left).toBe(1);
+    const runA = journal.listRuns()[0]!;
+    expect(journalTranscript(journal, runA.id)).toEqual([
+      "left:-1001",
+      "pending:-1002",
+      "pending:-1003",
+      "pending:-1004",
+    ]);
+
+    // A chat run A never planned must not be folded into run A: that would
+    // append a row the run did not plan and leave its own chats unfinishable.
+    const second = await core.runLeave(
+      client,
+      planOf([chat(-2001, "Fresh Find")]),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(second.planned).toBe(1);
+    expect(second.left).toBe(1);
+
+    const runs = journal.listRuns();
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.id).toBe(runA.id);
+    expect(runs[0]!.planned).toBe(4);
+    expect(runs[0]!.left).toBe(1);
+    expect(runs[0]!.finishedAt).toBeNull();
+    expect(journalTranscript(journal, runA.id)).toEqual([
+      "left:-1001",
+      "pending:-1002",
+      "pending:-1003",
+      "pending:-1004",
+    ]);
+    expect(journal.pending(runA.id).map((c) => c.id)).toEqual([-1002, -1003, -1004]);
+    expect(journalTranscript(journal, runs[1]!.id)).toEqual(["left:-2001"]);
+    journal.close();
+  });
+
+  test("a rerun of a finished plan touches no chat and reports every one as already settled", async () => {
+    const journal = openJournal();
+    const first = new FakeClient();
+    const done = await core.runLeave(
+      first,
+      planOf(),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(done.left).toBe(5);
+    expect(journal.listRuns()[0]!.finishedAt).toBe(FIXED_ISO);
+
+    // The same plan again: the journal already says every chat was left, so
+    // nothing may be left a second time. The chats are still reported.
+    const again = new FakeClient();
+    const recorder = recordingSleep();
+    const progress: Progress[] = [];
+    const second = await core.runLeave(again, planOf(), options(recorder, { journal }), (p) =>
+      progress.push(p),
+    );
+
+    expect(again.attempts).toEqual([]);
+    expect(recorder.sleeps).toEqual([]);
+    expect(transcript(progress)).toEqual([
+      "left:-1001",
+      "left:-1002",
+      "left:-1003",
+      "left:-1004",
+      "left:-1005",
+    ]);
+    expect(second.left).toBe(5);
+    expect(second.failed).toBe(0);
+
+    const runs = journal.listRuns();
+    expect(runs).toHaveLength(2);
+    expect(runs[1]!.planned).toBe(5);
+    expect(runs[1]!.left).toBe(5);
+    expect(runs[1]!.finishedAt).toBe(FIXED_ISO);
+    expect(journalTranscript(journal, runs[1]!.id)).toEqual([
+      "left:-1001",
+      "left:-1002",
+      "left:-1003",
+      "left:-1004",
+      "left:-1005",
+    ]);
+    journal.close();
+  });
+
+  test("a chat left while surviving a short flood is re-reported on resume without an error", async () => {
+    const client = new FakeClient({
+      failures: [
+        { chatId: -1001, error: fakeRpcError("FLOOD_WAIT_30") },
+        { chatId: -1002, error: fakeRpcError("FLOOD_WAIT_90") },
+      ],
+    });
+    const journal = openJournal();
+
+    const first = await core.runLeave(
+      client,
+      planOf(),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(first.left).toBe(1);
+    expect(first.floodWaitSeconds).toBe(90);
+
+    // The wait that was survived is a note, not a failure: `error` is for
+    // `failed`/`skipped` rows only.
+    const runId = journal.listRuns()[0]!.id;
+    const leftRow = journal.actions(runId).find((row) => row.id === -1001)!;
+    expect(leftRow.state).toBe("left");
+    expect(leftRow.error).toBeNull();
+
+    const progress: Progress[] = [];
+    await core.runLeave(client, planOf(), options(recordingSleep(), { journal }), (p) =>
+      progress.push(p),
+    );
+
+    const resumedLeft = progress.find((p) => p.chatId === -1001)!;
+    expect(resumedLeft.state).toBe("left");
+    expect(resumedLeft.error).toBeUndefined();
+    journal.close();
+  });
 });
 
 describe("caps", () => {

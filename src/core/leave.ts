@@ -13,12 +13,18 @@
  *   dies halfway leaves a journal a resumed run can trust. `startRun` has
  *   already seeded every planned chat `pending` (src/core/journal.ts), so this
  *   loop only ever moves rows forward, and a `pending` row means "not done".
- * - **Resume means the same run.** When the journal holds an unfinished run,
- *   this continues it: the chats it already settled (`left`/`failed`/`skipped`)
- *   are skipped and *reported* with their recorded state instead of being
- *   touched again, and only its `pending` chats are attempted. Starting a fresh
- *   run over the same chats would leave them twice, which is the one thing the
- *   journal exists to prevent.
+ * - **Resume means the same run and the same plan.** When the journal holds an
+ *   unfinished run that planned exactly these chats, this continues it: the
+ *   chats it already settled (`left`/`failed`/`skipped`) are skipped and
+ *   *reported* with their recorded state instead of being touched again, and
+ *   only its `pending` chats are attempted. A run that planned something else
+ *   is left alone -- absorbing a foreign plan would append a row the run never
+ *   planned and strand one of its own chats, and leaving a chat twice is the
+ *   one thing the journal exists to prevent.
+ * - **Never leave a chat twice, in any run.** A chat the journal already has as
+ *   `left` (or `skipped`) is settled, whether that verdict comes from the run
+ *   being continued or from a run that finished long ago, so a plan rerun
+ *   after a completed run attempts nothing.
  * - **A stop is not a failure.** A flood wait, a cap and an abort all leave the
  *   chats they did not reach `pending`, and never claim a chat was left when it
  *   was not. A flood and a cap are not retried, and the run is only marked
@@ -33,7 +39,7 @@
  * because the only outputs are the journal writes and the callback.
  */
 import { classify } from "./errors";
-import { type ActionState, type Journal } from "./journal";
+import { type ActionRow, type ActionState, type Journal } from "./journal";
 import { defaultSleep, Pacer, type PacerOptions, PacerCapError } from "./pacing";
 import type { TelegramClientLike } from "./telegram";
 import type { Plan, PlanChat } from "./types";
@@ -171,18 +177,65 @@ export async function runLeave(
   if (isAborted(opts.signal)) return { ...nothingHappened(total), aborted: true };
 
   const journal = opts.journal;
-  const resumed = journal === null ? null : journal.latestUnfinished();
+  const ids = chats.map((chat) => chat.id);
+
+  // Every run's newest verdict for these chats, read *before* this invocation
+  // opens a run of its own: the `pending` seeds a fresh run writes would
+  // otherwise be the newest thing the journal says about those chats and would
+  // shadow the run that already left them.
+  const prior = journal === null ? [] : journal.latestStates(ids);
+
+  // Which run this invocation writes to. A run may only be continued when its
+  // planned chats are *exactly* this plan's chats -- the same set, order aside.
+  // Continuing one that planned something else would append a row it never
+  // planned (breaking `runs.planned`) and leave one of its own chats `pending`
+  // forever, so the run could never finish. A plan that does not match gets its
+  // own run, and the unfinished one is left exactly as it was.
+  const candidate = journal === null ? null : journal.latestUnfinished();
+  const resumed =
+    journal !== null && candidate !== null && sameChats(chats, journal.actions(candidate.id))
+      ? candidate
+      : null;
   const runId: number | null =
     resumed !== null
       ? resumed.id
       : (journal?.startRun("leave", JSON.stringify(plan.filters), chats) ?? null);
 
-  // What a previous attempt already settled. A `pending` row is "not done", so
-  // it is not a settled state and the chat is attempted normally.
-  const settled = new Map<number, { state: SettledState; error: string | null }>();
-  if (journal !== null && resumed !== null) {
-    for (const row of journal.actions(resumed.id)) {
-      if (row.state !== "pending") settled.set(row.id, { state: row.state, error: row.error });
+  // The run's own ledger: one row per planned chat. `owned` is the authority for
+  // every write below, so a mark for a chat this run did not plan can never
+  // reach the database -- the guarantee is structural, not a convention the
+  // loop above is trusted to keep.
+  const runRows = journal === null || runId === null ? [] : journal.actions(runId);
+  const owned = new Set(runRows.map((row) => row.id));
+
+  // What is already settled, and so must not be attempted again.
+  //
+  // Two sources, because "never leave the same chat twice" spans runs. The run
+  // being continued contributes its own settled rows, so a failure it recorded
+  // is *re-reported* with the message it stored instead of retried. Then every
+  // run's newest verdict for these chats is folded in for `left`/`skipped`: a
+  // rerun of a plan a finished run already completed must attempt nothing.
+  const settled = new Map<
+    number,
+    { state: SettledState; error: string | null; recorded: boolean }
+  >();
+  if (journal !== null) {
+    for (const row of runRows) {
+      if (row.state === "pending") continue;
+      settled.set(row.id, {
+        state: row.state,
+        error: settledNote(row.state, row.error),
+        recorded: true,
+      });
+    }
+    for (const row of prior) {
+      if (row.state !== "left" && row.state !== "skipped") continue;
+      if (settled.get(row.id)?.recorded === true) continue;
+      settled.set(row.id, {
+        state: row.state,
+        error: settledNote(row.state, row.error),
+        recorded: false,
+      });
     }
   }
 
@@ -202,14 +255,19 @@ export async function runLeave(
   let floodWaitSeconds: number | null = null;
 
   const record = (chat: PlanChat, state: SettledState, error?: string): void => {
-    if (journal !== null && runId !== null) journal.mark(runId, chat, state, error);
+    if (journal === null || runId === null) return;
+    // Unreachable as the loop is written -- it only walks this plan's chats, and
+    // a resumed run holds exactly those. Refusing the write keeps a run's
+    // ledger describing the run that actually happened if that ever changes.
+    if (!owned.has(chat.id)) return;
+    journal.mark(runId, chat, state, error);
   };
 
   for (let index = 0; index < total; index++) {
     const chat = chats[index]!;
 
-    // Already settled by an earlier attempt: report it, count it, do not touch
-    // it. A recorded failure is reported as a failure, with its own message.
+    // Already settled: report it and count it, but never touch it again. A
+    // recorded failure is reported as a failure, with its own message.
     const before = settled.get(chat.id);
     if (before !== undefined) {
       counts[before.state] += 1;
@@ -220,6 +278,10 @@ export async function runLeave(
           error: before.error ?? "failed in an earlier run",
         });
       }
+      // A verdict that came from an *earlier* run has no row in this one, so it
+      // is carried forward: "this chat is left" is what the ledger means, and a
+      // `pending` row left behind would keep this run unfinishable.
+      if (!before.recorded) record(chat, before.state, before.error ?? undefined);
       onProgress({
         chatId: chat.id,
         title: chat.title,
@@ -270,7 +332,11 @@ export async function runLeave(
 
     if (outcome.kind === "left") {
       counts.left += 1;
-      record(chat, "left", outcome.note);
+      // No note in the journal: the survived flood wait is progress, and `error`
+      // means "this failed". Storing it would show an error column on a
+      // successful leave and re-emit it as an error when a resume re-reports
+      // the chat.
+      record(chat, "left");
       onProgress({
         chatId: chat.id,
         title: chat.title,
@@ -323,6 +389,34 @@ export async function runLeave(
   }
 
   return { planned: total, ...counts, aborted, capped, floodWaitSeconds, failures };
+}
+
+/**
+ * Does this plan ask for exactly the chats the run planned?
+ *
+ * Order may differ -- a manifest replayed in another order is the same plan --
+ * but the sets must match, with neither side repeating a chat. Anything looser
+ * would let a run absorb a chat it never planned, or strand one of its own
+ * `pending` chats so it could never finish.
+ */
+function sameChats(plan: PlanChat[], rows: ActionRow[]): boolean {
+  const planIds = new Set(plan.map((chat) => chat.id));
+  const runIds = new Set(rows.map((row) => row.id));
+  if (planIds.size !== plan.length || runIds.size !== rows.length) return false;
+  if (planIds.size !== runIds.size) return false;
+  for (const id of planIds) if (!runIds.has(id)) return false;
+  return true;
+}
+
+/**
+ * The message to keep for a settled row.
+ *
+ * `error` is for `failed`/`skipped` states; a `left` row has no failure to
+ * explain, so a note an older journal stored there (a survived flood wait) is
+ * dropped rather than re-emitted as an error on resume.
+ */
+function settledNote(state: SettledState, error: string | null): string | null {
+  return state === "left" ? null : error;
 }
 
 /** The result of a run that touched nothing: a clean dry run, or a pre-aborted one. */

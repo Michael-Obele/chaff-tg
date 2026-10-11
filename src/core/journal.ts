@@ -70,7 +70,7 @@ export interface ActionRow {
   id: number;
   title: string;
   state: ActionState;
-  /** The classified message when the state is `failed`; `null` otherwise. */
+  /** The classified message for a `failed`/`skipped` row; `null` otherwise. */
   error: string | null;
 }
 
@@ -343,6 +343,37 @@ export class Journal {
    */
   actions(runId: number): ActionRow[] {
     return this.#actions.all(runId) as ActionRow[];
+  }
+
+  /**
+   * Each of `chatIds`' newest recorded state, across *every* run.
+   *
+   * This is the read the cross-run safety rule needs and `pending()` cannot
+   * give it: "never leave the same chat twice" is a promise about the account,
+   * not about one run, so a plan rerun after a run that already finished must
+   * still see that those chats were left. A chat's newest run is the one with
+   * the highest `run_id` -- run ids are the log order -- and within a run there
+   * is only ever one row per chat, so this returns at most one row per id.
+   *
+   * The order is the caller's `chatIds` order, and ids with no recorded row are
+   * absent (there is nothing to report about a chat the journal has never
+   * seen); an empty `chatIds` is an empty answer, not a query for everything.
+   */
+  latestStates(chatIds: number[]): ActionRow[] {
+    if (chatIds.length === 0) return [];
+
+    const placeholders = chatIds.map(() => "?").join(", ");
+    const rows = this.#db
+      .query(
+        `select a.chat_id as id, a.title, a.state, a.error
+         from actions a
+         where a.chat_id in (${placeholders})
+           and a.run_id = (select max(b.run_id) from actions b where b.chat_id = a.chat_id)`,
+      )
+      .all(...chatIds) as ActionRow[];
+
+    const order = new Map(chatIds.map((id, index) => [id, index]));
+    return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   }
 
   /**

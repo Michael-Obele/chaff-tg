@@ -370,6 +370,35 @@ describe("finishRun and latestUnfinished", () => {
   });
 });
 
+describe("latestStates across runs", () => {
+  test("reports each chat's state from its newest run, whatever that run's status", () => {
+    const j = Journal.open(tempJournalPath(), fixedClock);
+    const first = startedRun(j, 3);
+    j.mark(first, CHATS[0]!, "left");
+    j.mark(first, CHATS[1]!, "failed", "boom");
+    j.finishRun(first);
+
+    // A newer run over one of the same chats: its verdict is the latest one,
+    // even though the older run is the one that carries the other states.
+    const second = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 1));
+    j.mark(second, CHATS[0]!, "left");
+    j.finishRun(second);
+
+    // One row per chat, in the order the ids were asked for. `pending` is a
+    // state like any other here; only the *newest* run is consulted per chat.
+    expect(j.latestStates(CHATS.slice(0, 3).map((c) => c.id))).toEqual([
+      { id: CHATS[0]!.id, title: CHATS[0]!.title, state: "left", error: null },
+      { id: CHATS[1]!.id, title: CHATS[1]!.title, state: "failed", error: "boom" },
+      { id: CHATS[2]!.id, title: CHATS[2]!.title, state: "pending", error: null },
+    ]);
+
+    // A chat with no recorded row anywhere is absent, not invented.
+    expect(j.latestStates([-9999])).toEqual([]);
+    expect(j.latestStates([])).toEqual([]);
+    j.close();
+  });
+});
+
 describe("timestamps come from the injected clock", () => {
   test("every recorded instant is the injected clock's, never the wall clock", () => {
     const path = tempJournalPath();
