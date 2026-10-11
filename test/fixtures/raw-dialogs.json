@@ -1,0 +1,311 @@
+[
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1001,
+      "chatType": "channel",
+      "displayName": "Signal Room",
+      "username": "signalroom",
+      "membersCount": 4821,
+      "isScam": true,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": true,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 412,
+    "lastMessage": { "date": "2024-08-02T09:12:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1002,
+      "chatType": "supergroup",
+      "displayName": "Crypto Chat Lounge",
+      "username": "cryptolounge",
+      "membersCount": 15000,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": true
+    },
+    "isMuted": true,
+    "isArchived": true,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2025-01-15T10:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1003,
+      "chatType": "group",
+      "displayName": "Family Group",
+      "username": null,
+      "membersCount": 12,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": true,
+    "unreadCount": 3,
+    "lastMessage": { "date": "2026-10-10T18:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1004,
+      "chatType": "channel",
+      "displayName": "Mega Broadcast",
+      "username": "megabcast",
+      "membersCount": null,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2026-09-01T12:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1005,
+      "chatType": "channel",
+      "displayName": "«Крипта 🚀»",
+      "username": "kripta",
+      "membersCount": 820,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": true,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 5,
+    "lastMessage": { "date": "2024-12-25T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1006,
+      "chatType": "group",
+      "displayName": "Empty Room",
+      "username": null,
+      "membersCount": 3,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": null
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1007,
+      "chatType": "gigagroup",
+      "displayName": "Town Square",
+      "username": "townsquare",
+      "membersCount": 25000,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": true,
+    "isPinned": false,
+    "unreadCount": 42,
+    "lastMessage": { "date": "2026-10-09T09:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1008,
+      "chatType": "community",
+      "displayName": "Dev Hub",
+      "username": "devhub",
+      "membersCount": 500,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": null,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2026-06-01T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1009,
+      "chatType": "monoforum",
+      "displayName": "News Monoforum",
+      "username": "newsmono",
+      "membersCount": 980,
+      "isScam": false,
+      "isFake": true,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 17,
+    "lastMessage": { "date": "2026-10-10T22:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1010,
+      "chatType": "channel",
+      "displayName": "Airdrop Alerts",
+      "username": "airdropalerts",
+      "membersCount": 340,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": true,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2025-11-01T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1011,
+      "chatType": "group",
+      "displayName": "Rust Community",
+      "username": "rustlang",
+      "membersCount": 6400,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": true
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2026-10-08T14:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1012,
+      "chatType": "supergroup",
+      "displayName": "VIP Signals Elite",
+      "username": "vipsignals",
+      "membersCount": 99,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": true,
+    "isArchived": true,
+    "isPinned": false,
+    "unreadCount": 8,
+    "lastMessage": { "date": "2023-05-01T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1013,
+      "chatType": "channel",
+      "displayName": "Fresh Daily",
+      "username": "freshdaily",
+      "membersCount": 220,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2026-10-11T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1014,
+      "chatType": "group",
+      "displayName": "Mixed Case Group",
+      "username": "MiXeDCaSe",
+      "membersCount": 45,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": null,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 1,
+    "lastMessage": { "date": "2025-07-04T12:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1015,
+      "chatType": "group",
+      "displayName": "Yearly Archive",
+      "username": "yearlyarchive",
+      "membersCount": 77,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2025-10-11T00:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "user",
+      "id": 424242,
+      "displayName": "Saved Messages",
+      "username": null
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": true,
+    "unreadCount": 0,
+    "lastMessage": { "date": "2026-10-11T12:00:00Z" }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -2002,
+      "chatType": "group",
+      "displayName": "Bare Minimum"
+    }
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -2003,
+      "chatType": "channel",
+      "displayName": "Journal Only",
+      "username": "journalonly",
+      "membersCount": 4,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "lastMessage": {}
+  }
+]
