@@ -21,17 +21,15 @@ import {
   ManifestError,
   parseManifest,
   serializeManifest,
-  type PlanChatShape,
-  type PlanShape,
 } from "../src/core/manifest";
-import type { ChatRecord, Filters } from "../src/core/types";
+import type { ChatRecord, Filters, Plan, PlanChat } from "../src/core/types";
 
 /**
  * The chat from the canonical example (plan/cli.md, "The review manifest").
  * Two additions the draft JSON omits: `isVerified`, which `ChatRecord`
  * requires, and nothing else.
  */
-const CHAT: PlanChatShape = {
+const CHAT: PlanChat = {
   id: -1001234567890,
   type: "channel",
   title: "Big Signals Premium",
@@ -77,7 +75,7 @@ const UNSET_FILTERS: Filters = {
  * filter set is a full `Filters` carrying the same three fields, since the
  * unset ones serialize away and come back from `parseManifest`.
  */
-const EXAMPLE: PlanShape = {
+const EXAMPLE: Plan = {
   version: 1,
   createdAt: "2026-10-11T13:04:00Z",
   account: { id: 1234567, username: "example" },
@@ -137,7 +135,7 @@ describe("serializeManifest", () => {
   });
 
   test("round-trips nullable and optional chat fields", () => {
-    const plan: PlanShape = {
+    const plan: Plan = {
       ...EXAMPLE,
       chats: [{ ...CHAT, username: null, members: null, lastMessageAt: null, neverPosted: true }],
     };
@@ -189,7 +187,7 @@ describe("serializeManifest", () => {
   });
 
   test("drops unset filters, keeps a nullable false as a direction", () => {
-    const plan: PlanShape = {
+    const plan: Plan = {
       ...EXAMPLE,
       filters: {
         types: null,

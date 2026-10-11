@@ -10,9 +10,14 @@
  *
  * Core rules hold: no stdout, no network, no clock. `ManifestError.code` is
  * the machine-readable reason; the message is a plain sentence users read.
+ *
+ * A manifest is a `Plan` (src/core/types.ts) and has no type of its own: it is
+ * the object `buildPlan` hands back. `filters` is the one field the file is
+ * allowed to thin out, so `parseManifest` re-hydrates it (see `hydrateFilters`)
+ * and the declared type stays honest.
  */
 import * as v from "valibot";
-import type { ChatRecord, ChatType, Filters } from "./types";
+import type { ChatType, Filters, Plan, PlanChat } from "./types";
 
 /** The one manifest format this build writes and the only one it reads. */
 export const MANIFEST_VERSION = 1;
@@ -29,31 +34,6 @@ export class ManifestError extends Error {
     this.name = "ManifestError";
     this.code = code;
   }
-}
-
-/** The account the manifest was written for (Task 4 moves this to types.ts). */
-export interface AccountShape {
-  id: number;
-  username: string | null;
-}
-
-/** One reviewed chat: the normalized record plus why it was selected. */
-export type PlanChatShape = ChatRecord & { why: string[] };
-
-/**
- * The manifest as a typed object, structurally what Task 4 will call `Plan`.
- * `filters` is a complete `Filters`: serialization drops the fields that are
- * unset, so `parseManifest` re-hydrates them back to their engine-safe
- * defaults before returning (see `hydrateFilters`). A parsed plan can be fed
- * straight back into the filter engine.
- */
-export interface PlanShape {
-  version: typeof MANIFEST_VERSION;
-  createdAt: string;
-  account: AccountShape;
-  filters: Filters;
-  summary: { matched: number; estimatedSeconds: number };
-  chats: PlanChatShape[];
 }
 
 /** Every chat type Telegram reports; kept in sync with `ChatType`. */
@@ -130,9 +110,17 @@ const planChatSchema = v.object({
   why: v.array(v.string()),
 });
 
+/**
+ * Compile-time tie: the schema's pinned version and `Plan["version"]`
+ * (src/core/types.ts) are the same number. Changing one without the other is a
+ * type error here, rather than a manifest that writes one version and claims
+ * another.
+ */
+const planVersion: Plan["version"] = MANIFEST_VERSION;
+
 /** The whole manifest, pinned to `MANIFEST_VERSION`. */
 export const planSchema = v.object({
-  version: v.literal(MANIFEST_VERSION),
+  version: v.literal(planVersion),
   createdAt: v.string(),
   account: v.object({
     id: int,
@@ -235,7 +223,7 @@ function hydrateFilters(serialized: Partial<Filters>): Filters {
  * `false` drop out, while a nullable boolean at `false` is a direction
  * (`--not-muted`, `--read`) and stays.
  */
-export function serializeManifest(p: PlanShape): string {
+export function serializeManifest(p: Plan): string {
   const out = {
     version: p.version,
     createdAt: p.createdAt,
@@ -283,7 +271,7 @@ export function serializeManifest(p: PlanShape): string {
  * dropped are re-hydrated to their engine-safe defaults, so the declared type
  * is true and the filters can go straight back into the engine.
  */
-export function parseManifest(text: string): PlanShape {
+export function parseManifest(text: string): Plan {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
