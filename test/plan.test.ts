@@ -14,8 +14,9 @@
  * - The plan is a value snapshot of one review, so a plan built here
  *   round-trips through `serializeManifest`/`parseManifest` unchanged.
  * - `applyExclude` is the last word: it removes ids from a plan that already
- *   exists, wins over `--include`, and re-points the estimate without
- *   re-running the filters (it has no clock to re-run them against).
+ *   exists, wins over `--include`, and recomputes the estimate from the same
+ *   formula for the kept rows (at the caller's pace) without re-running the
+ *   filters (it has no clock to re-run them against).
  */
 import { describe, expect, test } from "bun:test";
 import * as core from "../src/core";
@@ -232,13 +233,28 @@ describe("applyExclude", () => {
     expect(after.summary).toEqual({ matched: 3, estimatedSeconds: 4 });
   });
 
-  test("keeps the plan's own pace rather than assuming the default delay", () => {
+  test("recomputes the estimate from the formula, not by scaling the old one", () => {
+    // 3 rows at the documented 1200 ms default: round(3.6) = 4. Dropping one
+    // must be round(2 x 1.2) = 2, not the scaled round(4 x 2/3) = 3.
+    const plan = buildPlan(dialogs, filters({ muted: true, limit: 3 }), ACCOUNT, NOW);
+    expect(plan.summary).toEqual({ matched: 3, estimatedSeconds: 4 });
+
+    const after = applyExclude(plan, [-1001]);
+    expect(after.summary).toEqual({ matched: 2, estimatedSeconds: 2 });
+  });
+
+  test("takes the pace from the caller: a custom delayMs is honored, omission means the default", () => {
     // 4 rows at 3000 ms -> 12 s; dropping one -> 9 s, not 3.6 s.
     const plan = buildPlan(dialogs, filters({ muted: true, limit: 4 }), ACCOUNT, NOW, 3000);
     expect(plan.summary).toEqual({ matched: 4, estimatedSeconds: 12 });
 
-    const after = applyExclude(plan, [-1001]);
+    const after = applyExclude(plan, [-1001], 3000);
     expect(after.summary).toEqual({ matched: 3, estimatedSeconds: 9 });
+
+    // Without the argument the pace is the documented default, not the plan's:
+    // 3 rows at 1200 ms -> round(3.6) = 4.
+    const inferred = applyExclude(plan, [-1001]);
+    expect(inferred.summary).toEqual({ matched: 3, estimatedSeconds: 4 });
   });
 
   test("never re-runs the filters: an exclusion does not re-judge the kept rows", () => {

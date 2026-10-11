@@ -109,13 +109,20 @@ export function buildPlan(
  * Only `chats` and `summary` move: `filters` still describes the review that
  * produced the plan, and an act-time exclusion is not a new review.
  *
- * The plan does not record the `delayMs` it was built with, so the estimate is
- * re-derived from the plan's own numbers (a share of the estimate it already
- * carried) rather than recomputed at the default pace: excluding nothing
- * leaves the number exactly as it was, and a plan built with a custom
- * `--delay` keeps its pace.
+ * The estimate is recomputed, never scaled: `Plan` does not record the
+ * `delayMs` it was built with (the shape is pinned by plan/cli.md, which has no
+ * such field), so the pace arrives as an argument. The caller that knows a
+ * custom `--delay` -- the `leave --from` replay path, which reads the flag or
+ * config for the same run -- passes it; every other caller gets
+ * `DEFAULT_DELAY_MS`. Either way the number is
+ * `estimateSeconds(chats.length, delayMs)`, so the summary and every subset
+ * round by the one definition above instead of this path inventing a second.
  */
-export function applyExclude(plan: Plan, exclude: number[]): Plan {
+export function applyExclude(
+  plan: Plan,
+  exclude: number[],
+  delayMs: number = DEFAULT_DELAY_MS,
+): Plan {
   const chats = filterRecords(plan.chats, { ...NO_FILTERS, exclude }, NO_CLOCK)
     .filter((row) => row.ok)
     // `filterRecords` hands back the very objects it was given, so these are
@@ -126,10 +133,7 @@ export function applyExclude(plan: Plan, exclude: number[]): Plan {
     ...plan,
     summary: {
       matched: chats.length,
-      estimatedSeconds:
-        plan.summary.matched === 0
-          ? 0
-          : Math.round((plan.summary.estimatedSeconds * chats.length) / plan.summary.matched),
+      estimatedSeconds: estimateSeconds(chats.length, delayMs),
     },
     chats,
   };
