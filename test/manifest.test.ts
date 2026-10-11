@@ -11,8 +11,11 @@
  *   -> `malformed`, broken JSON -> `not-json`. The unknown-version message
  *   names both the file's version and the supported one.
  * - Unknown extra keys are ignored, never errors (forward compatibility).
+ * - `parseManifest` re-hydrates every unset filter to its engine-safe default,
+ *   so the parsed `filters` is a complete `Filters` the engine can consume.
  */
 import { describe, expect, test } from "bun:test";
+import { filterRecords } from "../src/core/filters";
 import {
   MANIFEST_VERSION,
   ManifestError,
@@ -21,6 +24,7 @@ import {
   type PlanChatShape,
   type PlanShape,
 } from "../src/core/manifest";
+import type { ChatRecord, Filters } from "../src/core/types";
 
 /**
  * The chat from the canonical example (plan/cli.md, "The review manifest").
@@ -44,19 +48,62 @@ const CHAT: PlanChatShape = {
   why: ["keyword:signal", "muted", "inactive:365d"],
 };
 
+/** The state the engine treats as "no filter": every key at its unset default. */
+const UNSET_FILTERS: Filters = {
+  types: null,
+  keyword: [],
+  any: [],
+  not: [],
+  regex: null,
+  ids: null,
+  muted: null,
+  archived: null,
+  inactiveDays: null,
+  neverPosted: false,
+  members: null,
+  scam: false,
+  fake: false,
+  unread: null,
+  pinned: null,
+  include: [],
+  exclude: [],
+  limit: null,
+};
+
 /**
  * The canonical example as a Plan-shaped object. The draft JSON writes the
  * type filter as `type`; the serialized form uses the `Filters` field name
- * `types` (src/core/types.ts), everything else matches key for key.
+ * `types` (src/core/types.ts), everything else matches key for key. The
+ * filter set is a full `Filters` carrying the same three fields, since the
+ * unset ones serialize away and come back from `parseManifest`.
  */
 const EXAMPLE: PlanShape = {
   version: 1,
   createdAt: "2026-10-11T13:04:00Z",
   account: { id: 1234567, username: "example" },
-  filters: { types: ["channel", "supergroup"], muted: true, inactiveDays: 365 },
+  filters: { ...UNSET_FILTERS, types: ["channel", "supergroup"], muted: true, inactiveDays: 365 },
   summary: { matched: 37, estimatedSeconds: 52 },
   chats: [CHAT],
 };
+
+/**
+ * A full filter set with three keys set and fifteen unset, so a parsed
+ * manifest exercises both halves of the re-hydration contract.
+ */
+const SET_FILTERS: Filters = {
+  ...UNSET_FILTERS,
+  types: ["channel", "supergroup"],
+  muted: true,
+  not: ["airdrop"],
+};
+
+/** The shared dialog fixture, read the same way `filters.test.ts` reads it. */
+const DIALOGS = (await Bun.file(
+  new URL("./fixtures/dialogs.json", import.meta.url),
+).json()) as ChatRecord[];
+
+/** Fixed clock for the engine call; none of the assertions depend on drift. */
+const PARSE_NOW = new Date("2026-10-11T00:00:00Z");
 
 /** Run `fn`, require a `ManifestError`, and hand it back for further asserts. */
 function caughtManifestError(fn: () => unknown): ManifestError {
@@ -173,7 +220,7 @@ describe("serializeManifest", () => {
   });
 
   test("always writes every top-level key, even with no filters set", () => {
-    const json = JSON.parse(serializeManifest({ ...EXAMPLE, filters: {} }));
+    const json = JSON.parse(serializeManifest({ ...EXAMPLE, filters: UNSET_FILTERS }));
     expect(Object.keys(json)).toEqual([
       "version",
       "createdAt",
@@ -256,5 +303,97 @@ describe("parseManifest", () => {
   test("ignores unknown extra keys inside a chat", () => {
     const text = edited((raw) => (raw.chats[0].futureField = 1));
     expect(parseManifest(text)).toEqual(EXAMPLE);
+  });
+});
+
+describe("parseManifest, filter re-hydration", () => {
+  test("re-hydrates every unset filter to its engine-safe default", () => {
+    const parsed = parseManifest(serializeManifest({ ...EXAMPLE, filters: SET_FILTERS }));
+    // The parsed filters are a complete `Filters`, in declaration order.
+    const complete: Filters = parsed.filters;
+    expect(Object.keys(complete)).toEqual([
+      "types",
+      "keyword",
+      "any",
+      "not",
+      "regex",
+      "ids",
+      "muted",
+      "archived",
+      "inactiveDays",
+      "neverPosted",
+      "members",
+      "scam",
+      "fake",
+      "unread",
+      "pinned",
+      "include",
+      "exclude",
+      "limit",
+    ]);
+    expect(Object.keys(complete)).toHaveLength(18);
+    // Set keys keep their values; unset keys get their defaults.
+    expect(complete.types).toEqual(["channel", "supergroup"]);
+    expect(complete.not).toEqual(["airdrop"]);
+    expect(complete.muted).toBe(true);
+    expect(complete.keyword).toEqual([]);
+    expect(complete.any).toEqual([]);
+    expect(complete.include).toEqual([]);
+    expect(complete.exclude).toEqual([]);
+    expect(complete.neverPosted).toBe(false);
+    expect(complete.scam).toBe(false);
+    expect(complete.fake).toBe(false);
+    expect(complete.regex).toBeNull();
+    expect(complete.ids).toBeNull();
+    expect(complete.archived).toBeNull();
+    expect(complete.inactiveDays).toBeNull();
+    expect(complete.members).toBeNull();
+    expect(complete.unread).toBeNull();
+    expect(complete.pinned).toBeNull();
+    expect(complete.limit).toBeNull();
+  });
+
+  test("feeds the parsed filters straight into filterRecords", () => {
+    const parsed = parseManifest(serializeManifest({ ...EXAMPLE, filters: SET_FILTERS }));
+    // This is the crash the finding describes: before re-hydration, the parsed
+    // filter set lacked `keyword`/`include`/`exclude` and the engine threw on
+    // the first array access.
+    const rows = filterRecords(DIALOGS, parsed.filters, PARSE_NOW);
+    expect(rows).toHaveLength(DIALOGS.length);
+    expect(rows.filter((r) => r.ok).map((r) => r.chat.id)).toEqual([
+      -1001, // channel, muted, not an airdrop
+      -1002, // supergroup, muted
+      -1005, // channel, muted
+      -1012, // supergroup, muted; -1010 is rejected by `not: ["airdrop"]`
+    ]);
+  });
+
+  test("round-trips byte-for-byte and still drops unset filters on re-serialize", () => {
+    const text = serializeManifest({ ...EXAMPLE, filters: SET_FILTERS });
+    const parsed = parseManifest(text);
+    // `setFilters` is untouched: re-serializing a re-hydrated plan writes the
+    // same bytes as the input, so the drop-unset behavior is unchanged.
+    expect(serializeManifest(parsed)).toBe(text);
+    expect(Object.keys(JSON.parse(serializeManifest(parsed)).filters)).toEqual([
+      "types",
+      "not",
+      "muted",
+    ]);
+  });
+
+  test("keeps a serialized `types: []` rejecting everything and `muted: false`", () => {
+    const text = edited((raw) => {
+      raw.filters = { types: [], muted: false };
+    });
+    const parsed = parseManifest(text);
+    // An empty array rejects every chat; it must not be re-hydrated to `null`
+    // (which would match everything).
+    expect(parsed.filters.types).toEqual([]);
+    // A serialized `false` is a direction (--not-muted); it must stay `false`,
+    // not become `null` (which would mean "use the account default").
+    expect(parsed.filters.muted).toBe(false);
+    const rows = filterRecords(DIALOGS, parsed.filters, PARSE_NOW);
+    expect(rows).toHaveLength(DIALOGS.length);
+    expect(rows.every((r) => !r.ok)).toBe(true);
   });
 });

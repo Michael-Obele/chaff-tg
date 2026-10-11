@@ -42,14 +42,16 @@ export type PlanChatShape = ChatRecord & { why: string[] };
 
 /**
  * The manifest as a typed object, structurally what Task 4 will call `Plan`.
- * `filters` is partial: serialization drops the fields that are unset, so a
- * parsed manifest carries only the filters that were actually set.
+ * `filters` is a complete `Filters`: serialization drops the fields that are
+ * unset, so `parseManifest` re-hydrates them back to their engine-safe
+ * defaults before returning (see `hydrateFilters`). A parsed plan can be fed
+ * straight back into the filter engine.
  */
 export interface PlanShape {
   version: typeof MANIFEST_VERSION;
   createdAt: string;
   account: AccountShape;
-  filters: Partial<Filters>;
+  filters: Filters;
   summary: { matched: number; estimatedSeconds: number };
   chats: PlanChatShape[];
 }
@@ -168,6 +170,63 @@ function setFilters(f: Partial<Filters>): Partial<Filters> {
   return out;
 }
 
+/** Every field at the value the engine treats as "not set". Fresh each call. */
+function defaultFilters(): Filters {
+  return {
+    types: null,
+    keyword: [],
+    any: [],
+    not: [],
+    regex: null,
+    ids: null,
+    muted: null,
+    archived: null,
+    inactiveDays: null,
+    neverPosted: false,
+    members: null,
+    scam: false,
+    fake: false,
+    unread: null,
+    pinned: null,
+    include: [],
+    exclude: [],
+    limit: null,
+  };
+}
+
+/**
+ * Complete a serialized filter set, the inverse of `setFilters`.
+ *
+ * `??` restores only what is absent (`undefined`), so a serialized value is
+ * never flattened into its default: an empty array stays an empty array (it
+ * rejects everything, unlike `null`, which matches everything), and a
+ * nullable boolean at `false` stays a direction (`--not-muted`, `--read`).
+ * Keys whose unset state is `null` come back as `null` either way.
+ */
+function hydrateFilters(serialized: Partial<Filters>): Filters {
+  const d = defaultFilters();
+  return {
+    types: serialized.types ?? d.types,
+    keyword: serialized.keyword ?? d.keyword,
+    any: serialized.any ?? d.any,
+    not: serialized.not ?? d.not,
+    regex: serialized.regex ?? d.regex,
+    ids: serialized.ids ?? d.ids,
+    muted: serialized.muted ?? d.muted,
+    archived: serialized.archived ?? d.archived,
+    inactiveDays: serialized.inactiveDays ?? d.inactiveDays,
+    neverPosted: serialized.neverPosted ?? d.neverPosted,
+    members: serialized.members ?? d.members,
+    scam: serialized.scam ?? d.scam,
+    fake: serialized.fake ?? d.fake,
+    unread: serialized.unread ?? d.unread,
+    pinned: serialized.pinned ?? d.pinned,
+    include: serialized.include ?? d.include,
+    exclude: serialized.exclude ?? d.exclude,
+    limit: serialized.limit ?? d.limit,
+  };
+}
+
 /**
  * Write a manifest: fixed key order, 2-space indent, one trailing newline.
  *
@@ -219,6 +278,10 @@ export function serializeManifest(p: PlanShape): string {
  *   names the file's version and the supported one.
  * - `malformed` — a known key has the wrong type, or a required key is
  *   missing. Unknown keys are ignored, not rejected.
+ *
+ * The returned plan carries a complete `Filters`: the fields serialization
+ * dropped are re-hydrated to their engine-safe defaults, so the declared type
+ * is true and the filters can go straight back into the engine.
  */
 export function parseManifest(text: string): PlanShape {
   let raw: unknown;
@@ -262,5 +325,5 @@ export function parseManifest(text: string): PlanShape {
       `manifest is malformed${where ? ` at "${where}"` : ""}: ${issue.message}`,
     );
   }
-  return parsed.output;
+  return { ...parsed.output, filters: hydrateFilters(parsed.output.filters) };
 }
