@@ -18,3 +18,14 @@ export { applyExclude, buildPlan, DEFAULT_DELAY_MS, estimateSeconds } from "./pl
 export { Journal } from "./journal";
 export type { ActionState, PendingChat, PlannedChat, RunMode, RunRow } from "./journal";
 export type { Account, Plan, PlanChat } from "./types";
+
+//
+// The safety seams: the pause between leaves (`Pacer`) and the decision every
+// Telegram failure becomes (`classify`). Both are pure and both take their
+// clock/randomness/sleep as injected callbacks, so neither reaches for a
+// global and neither can be tested against real time.
+//
+export { ChaffError, classify, EXIT } from "./errors";
+export type { Classified, ClassifyOptions, ErrorKind } from "./errors";
+export { abortError, Pacer, PacerCapError } from "./pacing";
+export type { PacerOptions } from "./pacing";
