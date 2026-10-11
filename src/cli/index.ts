@@ -1,0 +1,171 @@
+#!/usr/bin/env bun
+/**
+ * The CLI front end: parse, dispatch, return an exit code (`plan/cli.md`).
+ *
+ * `runCli` is the whole front end, and it is a function of its context: argv,
+ * the environment, the two writers, the clock and whether stdout is a TTY all
+ * arrive as arguments. Nothing in here reads `process` or the real console, so
+ * a test can run any command and capture every byte it produces, and the TUI
+ * (v2) can reuse the same dispatch. The only place that touches the process is
+ * the thin wrapper at the bottom of this file, and even that only sets
+ * `process.exitCode` — `runCli` never exits, because a function that kills its
+ * own caller cannot be tested.
+ *
+ * Dispatch is a table, not a chain: `COMMANDS` is the list of commands, and it
+ * is also the command list the usage text is rendered from, so adding a command
+ * is adding one row. Every row is a stub until Tasks 11-14 land the real
+ * commands; a stub says so on stderr and exits 1 (`EXIT.ERROR`), because "not
+ * built yet" is an unexpected error, not a usage mistake.
+ *
+ * Failures are mapped in one place: bad usage exits 2, a classified
+ * `ChaffError` exits with the code the core's taxonomy already chose, and
+ * anything else exits 1. The core returns facts and this file turns them into
+ * codes — the same rule `runLeave` follows, one level up.
+ */
+import { ChaffError, EXIT } from "../core/errors";
+import { parseArgs, UsageError, type ParsedArgs } from "./args";
+import { renderUsage, type CommandBrief } from "./usage";
+
+/**
+ * The version and commit the build stamped in (`scripts/build.ts` defines
+ * `CHAFF_VERSION` and `CHAFF_COMMIT`). Both are `typeof`-guarded because
+ * `bun run src/cli/index.ts` has no build step and the identifiers are simply
+ * not there; `dev` is the honest answer for a from-source run.
+ */
+declare const CHAFF_VERSION: string | undefined;
+declare const CHAFF_COMMIT: string | undefined;
+
+/** The version this build reports. */
+export const CLI_VERSION: string = typeof CHAFF_VERSION === "undefined" ? "dev" : CHAFF_VERSION;
+
+/** The commit this build came from. */
+export const CLI_COMMIT: string = typeof CHAFF_COMMIT === "undefined" ? "dev" : CHAFF_COMMIT;
+
+/** `chaff <version> (<commit>)`, which is what `--version` prints. */
+export function versionLine(): string {
+  return `chaff ${CLI_VERSION} (${CLI_COMMIT})\n`;
+}
+
+/** Anything that can receive a written chunk: `process.stdout`, or a test's sink. */
+export interface Writer {
+  write(s: string): unknown;
+}
+
+/** Everything `runCli` is allowed to touch, all of it injected. */
+export interface CliContext {
+  /** The command line without the runtime and the script path. */
+  argv: string[];
+  env: Record<string, string | undefined>;
+  stdout: Writer;
+  stderr: Writer;
+  /** The clock, so a command never reads the system time itself. */
+  now(): Date;
+  /** Whether stdout is a terminal, which decides prompts and the checklist. */
+  isTTY: boolean;
+}
+
+/** One command: how it is listed in the help, and what it does. */
+export interface Command extends CommandBrief {
+  /** Returns the process exit code; never calls `process.exit`. */
+  run(ctx: CliContext, args: ParsedArgs): Promise<number>;
+}
+
+/** A command that has not been built yet. Tasks 11-14 replace these rows. */
+function stub(name: string, summary: string): Command {
+  return {
+    name,
+    summary,
+    async run(ctx) {
+      ctx.stderr.write(`${name} is not implemented yet.\n`);
+      return EXIT.ERROR;
+    },
+  };
+}
+
+/** Every command, in the order `plan/cli.md`, "Commands" lists them. */
+export const COMMANDS: readonly Command[] = [
+  stub("login", "Ask for the my.telegram.org credentials and store the session"),
+  stub("whoami", "Show the logged in account and where the session file lives"),
+  stub("list", "List dialogs as a table, with filters applied"),
+  stub("report", "Write a review manifest (table, JSON, CSV or markdown)"),
+  stub("leave", "Leave the selected chats"),
+  stub("journal", "Show what previous runs did"),
+  stub("doctor", "Check the local setup: paths, file modes, and config"),
+  stub("logout", "Delete the local session file"),
+  stub("tui", "Open the full screen interface"),
+];
+
+/** A thrown value as a sentence: no stack trace, no `[object Object]`. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The exit code a thrown value earns. A usage error is 2; a classified failure
+ * carries the code the taxonomy already chose for it (`src/core/errors.ts`);
+ * anything else is an unexpected error, 1.
+ */
+function exitCodeOf(error: unknown): number {
+  if (error instanceof UsageError) return error.exitCode;
+  if (error instanceof ChaffError) return error.exitCode;
+  return EXIT.ERROR;
+}
+
+/**
+ * Run one command line and return its exit code.
+ *
+ * `--version` wins over everything: it has to work even when the rest of the
+ * line is nonsense, which is what a bug report needs. `--help`, a missing
+ * command and an unknown command all print the usage text to stderr and exit 2
+ * (`plan/cli.md`, "Exit codes": 2 is the code for a line the tool cannot act on).
+ */
+export async function runCli(ctx: CliContext): Promise<number> {
+  let args: ParsedArgs;
+  try {
+    args = parseArgs(ctx.argv);
+  } catch (error) {
+    ctx.stderr.write(`${messageOf(error)}\n\n${renderUsage(COMMANDS)}`);
+    return exitCodeOf(error);
+  }
+
+  if (args.flags.version) {
+    ctx.stdout.write(versionLine());
+    return EXIT.OK;
+  }
+
+  if (args.flags.help || args.command === null) {
+    ctx.stderr.write(renderUsage(COMMANDS));
+    return EXIT.USAGE;
+  }
+
+  const command = COMMANDS.find((candidate) => candidate.name === args.command);
+  if (command === undefined) {
+    ctx.stderr.write(`unknown command ${JSON.stringify(args.command)}\n\n${renderUsage(COMMANDS)}`);
+    return EXIT.USAGE;
+  }
+
+  try {
+    return await command.run(ctx, args);
+  } catch (error) {
+    ctx.stderr.write(`${messageOf(error)}\n`);
+    return exitCodeOf(error);
+  }
+}
+
+/** The real process, wired into the injected context. Used by the wrapper only. */
+function processContext(): CliContext {
+  return {
+    argv: process.argv.slice(2),
+    env: process.env,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    now: () => new Date(),
+    isTTY: process.stdout.isTTY === true,
+  };
+}
+
+// The thin wrapper: the only code that knows a process exists. `import.meta.main`
+// is false when a test imports this file, so nothing here runs under `bun test`.
+if (import.meta.main) {
+  process.exitCode = await runCli(processContext());
+}

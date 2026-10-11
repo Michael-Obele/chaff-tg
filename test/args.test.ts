@@ -1,0 +1,390 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { EXIT } from "../src/core/errors";
+import { DEFAULT_CONFIG } from "../src/core/index";
+import type { Filters } from "../src/core/types";
+import { parseArgs, UsageError, type ParsedArgs } from "../src/cli/args";
+import {
+  CLI_COMMIT,
+  CLI_VERSION,
+  COMMANDS,
+  runCli,
+  versionLine,
+  type CliContext,
+} from "../src/cli/index";
+
+//
+// One row per flag in plan/cli.md, "Filters" -- the canonical flag names. A
+// row's argv uses the long form; the rows whose flag cli.md documents with a
+// short alias are repeated with the short spelling, so both forms are pinned.
+//
+const FILTER_ROWS: ReadonlyArray<{ flag: string; argv: string[]; want: Partial<Filters> }> = [
+  {
+    flag: "--type",
+    argv: ["--type", "channel,supergroup"],
+    want: { types: ["channel", "supergroup"] },
+  },
+  { flag: "-k/--keyword", argv: ["-k", "signal,vip"], want: { keyword: ["signal", "vip"] } },
+  { flag: "--keyword", argv: ["--keyword", " Signal , "], want: { keyword: ["Signal"] } },
+  { flag: "-K/--any", argv: ["-K", "vip,airdrop"], want: { any: ["vip", "airdrop"] } },
+  { flag: "--any", argv: ["--any", "vip"], want: { any: ["vip"] } },
+  { flag: "--not", argv: ["--not", "airdrop"], want: { not: ["airdrop"] } },
+  { flag: "-r/--regex", argv: ["-r", "^Rust"], want: { regex: "^Rust" } },
+  { flag: "--regex", argv: ["--regex", "^Rust"], want: { regex: "^Rust" } },
+  { flag: "--id", argv: ["--id", "-1001,-1002"], want: { ids: [-1001, -1002] } },
+  { flag: "--muted", argv: ["--muted"], want: { muted: true } },
+  { flag: "--not-muted", argv: ["--not-muted"], want: { muted: false } },
+  { flag: "--archived", argv: ["--archived"], want: { archived: true } },
+  { flag: "--no-archived", argv: ["--no-archived"], want: { archived: false } },
+  { flag: "--inactive-days", argv: ["--inactive-days", "365"], want: { inactiveDays: 365 } },
+  { flag: "--never-posted", argv: ["--never-posted"], want: { neverPosted: true } },
+  { flag: "--members", argv: ["--members", "0-50"], want: { members: { min: 0, max: 50 } } },
+  { flag: "--scam", argv: ["--scam"], want: { scam: true } },
+  { flag: "--fake", argv: ["--fake"], want: { fake: true } },
+  { flag: "--unread", argv: ["--unread"], want: { unread: true } },
+  { flag: "--read", argv: ["--read"], want: { unread: false } },
+  { flag: "--pinned", argv: ["--pinned"], want: { pinned: true } },
+  { flag: "--no-pinned", argv: ["--no-pinned"], want: { pinned: false } },
+  { flag: "--include", argv: ["--include", "-1,-2"], want: { include: [-1, -2] } },
+  { flag: "--exclude", argv: ["--exclude", "-3"], want: { exclude: [-3] } },
+  { flag: "--limit", argv: ["--limit", "25"], want: { limit: 25 } },
+];
+
+/** Every filter starts at the value the filter engine treats as "unset". */
+const UNSET_FILTERS: Filters = {
+  types: null,
+  keyword: [],
+  any: [],
+  not: [],
+  regex: null,
+  ids: null,
+  muted: null,
+  archived: null,
+  inactiveDays: null,
+  neverPosted: false,
+  members: null,
+  scam: false,
+  fake: false,
+  unread: null,
+  pinned: null,
+  include: [],
+  exclude: [],
+  limit: null,
+};
+
+describe("parseArgs: filters", () => {
+  for (const row of FILTER_ROWS) {
+    test(`${row.flag} lands in filters`, () => {
+      expect(parseArgs(row.argv).filters).toEqual({ ...UNSET_FILTERS, ...row.want });
+    });
+  }
+
+  test("no flags leaves every filter unset", () => {
+    const args = parseArgs([]);
+    expect(args.command).toBeNull();
+    expect(args.filters).toEqual(UNSET_FILTERS);
+    expect(args.provided.size).toBe(0);
+  });
+});
+
+describe("parseArgs: selection and pacing", () => {
+  const ROWS: ReadonlyArray<{
+    flag: string;
+    argv: string[];
+    want: Partial<ParsedArgs["selection"]>;
+  }> = [
+    { flag: "--max-leave", argv: ["--max-leave", "10"], want: { maxLeave: 10 } },
+    { flag: "--max-leave 0", argv: ["--max-leave", "0"], want: { maxLeave: 0 } },
+    { flag: "--delay", argv: ["--delay", "500"], want: { delayMs: 500 } },
+    { flag: "--clear", argv: ["--clear"], want: { clear: true } },
+    { flag: "--yes", argv: ["--yes"], want: { yes: true } },
+    { flag: "--force", argv: ["--force"], want: { force: true } },
+    {
+      flag: "--from",
+      argv: ["--from", "plans/cleanup.json"],
+      want: { from: "plans/cleanup.json" },
+    },
+    {
+      flag: "--select",
+      argv: ["--select", "-1001234567890,-1009876543210", "--yes"],
+      want: { select: [-1001234567890, -1009876543210] },
+    },
+  ];
+
+  for (const row of ROWS) {
+    test(`${row.flag} lands in selection`, () => {
+      expect(parseArgs(row.argv).selection).toMatchObject(row.want);
+    });
+  }
+
+  test("defaults are the documented ones: maxLeave 50, delayMs 1200", () => {
+    const { selection } = parseArgs([]);
+    expect(selection.maxLeave).toBe(50);
+    expect(selection.delayMs).toBe(1200);
+    expect(selection.maxLeave).toBe(DEFAULT_CONFIG.maxLeave);
+    expect(selection.delayMs).toBe(DEFAULT_CONFIG.delayMs);
+  });
+
+  test("--dry-run is accepted, and --yes is implied off", () => {
+    expect(parseArgs(["--dry-run"]).flags.dryRun).toBe(true);
+    expect(parseArgs(["--dry-run"]).selection.yes).toBe(false);
+  });
+
+  test("--dry-run beats --yes: the safe direction wins", () => {
+    expect(parseArgs(["--yes", "--dry-run"]).selection.yes).toBe(false);
+    expect(parseArgs(["--yes"]).selection.yes).toBe(true);
+  });
+});
+
+describe("parseArgs: output", () => {
+  const ROWS: ReadonlyArray<{ flag: string; argv: string[]; want: Partial<ParsedArgs["flags"]> }> =
+    [
+      { flag: "--json", argv: ["--json"], want: { json: true } },
+      { flag: "--csv", argv: ["--csv"], want: { csv: true } },
+      { flag: "--md", argv: ["--md"], want: { md: true } },
+      { flag: "--out", argv: ["--out", "cleanup.md"], want: { out: "cleanup.md" } },
+      { flag: "--quiet", argv: ["--quiet"], want: { quiet: true } },
+      { flag: "-v/--verbose", argv: ["-v"], want: { verbose: true } },
+      { flag: "--verbose", argv: ["--verbose"], want: { verbose: true } },
+      { flag: "-h/--help", argv: ["-h"], want: { help: true } },
+      { flag: "--help", argv: ["--help"], want: { help: true } },
+      { flag: "-V/--version", argv: ["-V"], want: { version: true } },
+      { flag: "--version", argv: ["--version"], want: { version: true } },
+    ];
+
+  for (const row of ROWS) {
+    test(`${row.flag} lands in flags`, () => {
+      expect(parseArgs(row.argv).flags).toMatchObject(row.want);
+    });
+  }
+});
+
+describe("parseArgs: command and value shapes", () => {
+  test("the first bare word is the command; flags may precede it", () => {
+    expect(parseArgs(["list", "--json"]).command).toBe("list");
+    expect(parseArgs(["--json", "list"]).command).toBe("list");
+    expect(parseArgs([]).command).toBeNull();
+  });
+
+  test("a second bare word is a usage error", () => {
+    expect(() => parseArgs(["list", "extra"])).toThrow(UsageError);
+  });
+
+  test("--flag=value is accepted", () => {
+    expect(parseArgs(["--out=cleanup.md"]).flags.out).toBe("cleanup.md");
+    expect(parseArgs(["--keyword=signal,vip"]).filters.keyword).toEqual(["signal", "vip"]);
+  });
+
+  test("a value may start with a dash: --select takes negative chat ids", () => {
+    const args = parseArgs(["--select", "-1001234567890,-1009876543210", "--yes"]);
+    expect(args.selection.select).toEqual([-1001234567890, -1009876543210]);
+    expect(parseArgs(["--id", "-1001"]).filters.ids).toEqual([-1001]);
+  });
+
+  test("--members parses a range, and only a range", () => {
+    expect(parseArgs(["--members", "0-50"]).filters.members).toEqual({ min: 0, max: 50 });
+    expect(() => parseArgs(["--members", "50-0"])).toThrow(UsageError);
+    expect(() => parseArgs(["--members", "abc"])).toThrow(UsageError);
+    expect(() => parseArgs(["--members", "50"])).toThrow(UsageError);
+  });
+
+  test("--provided records which flags were given, in canonical long spelling", () => {
+    const args = parseArgs(["-k", "signal", "--max-leave", "10", "list"]);
+    expect([...args.provided].sort()).toEqual(["keyword", "max-leave"]);
+  });
+});
+
+describe("parseArgs: conflicts and bad usage exit 2", () => {
+  const CONFLICTS: ReadonlyArray<{ name: string; argv: string[] }> = [
+    { name: "--muted with --not-muted", argv: ["--muted", "--not-muted"] },
+    { name: "--archived with --no-archived", argv: ["--archived", "--no-archived"] },
+    { name: "--unread with --read", argv: ["--unread", "--read"] },
+    { name: "--pinned with --no-pinned", argv: ["--pinned", "--no-pinned"] },
+    { name: "--quiet with --verbose", argv: ["--quiet", "-v"] },
+    { name: "--json with --csv", argv: ["--json", "--csv"] },
+    { name: "--csv with --md", argv: ["--csv", "--md"] },
+    { name: "--json with --md", argv: ["--json", "--md"] },
+    { name: "--select without --yes", argv: ["--select", "-1"] },
+  ];
+
+  for (const row of CONFLICTS) {
+    test(`${row.name} is a usage error`, () => {
+      const error = captureError(() => parseArgs(row.argv));
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as UsageError).exitCode).toBe(EXIT.USAGE);
+    });
+  }
+
+  const BAD_USAGE: ReadonlyArray<{ name: string; argv: string[] }> = [
+    { name: "an unknown flag", argv: ["--nope"] },
+    { name: "an unknown short flag", argv: ["-z"] },
+    { name: "a missing value", argv: ["--out"] },
+    { name: "a non-numeric number", argv: ["--limit", "abc"] },
+    { name: "a negative limit", argv: ["--limit", "-1"] },
+    { name: "an unknown chat type", argv: ["--type", "nonsense"] },
+    { name: "a non-numeric id", argv: ["--id", "abc"] },
+    { name: "a value given to a switch", argv: ["--muted=yes"] },
+  ];
+
+  for (const row of BAD_USAGE) {
+    test(`${row.name} throws UsageError (exit ${EXIT.USAGE})`, () => {
+      const error = captureError(() => parseArgs(row.argv));
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as UsageError).exitCode).toBe(EXIT.USAGE);
+    });
+  }
+});
+
+describe("runCli: dispatch, version, help, and stubs", () => {
+  test("--version prints version and commit to stdout and exits 0", async () => {
+    const io = capture();
+    const code = await runCli({ ...io.ctx, argv: ["--version"] });
+    expect(code).toBe(EXIT.OK);
+    expect(io.stdout.text()).toContain(CLI_VERSION);
+    expect(io.stdout.text()).toContain(CLI_COMMIT);
+    expect(io.stderr.text()).toBe("");
+  });
+
+  test("versionLine names the binary, the version and the commit", () => {
+    expect(versionLine()).toBe(`chaff ${CLI_VERSION} (${CLI_COMMIT})\n`);
+  });
+
+  test("the build defines are absent here, so both default to dev", () => {
+    expect(CLI_VERSION).toBe("dev");
+    expect(CLI_COMMIT).toBe("dev");
+  });
+
+  test("--help prints usage to stderr and exits 2", async () => {
+    const io = capture();
+    const code = await runCli({ ...io.ctx, argv: ["--help"] });
+    expect(code).toBe(EXIT.USAGE);
+    expect(io.stderr.text()).toContain("--keyword");
+    expect(io.stdout.text()).toBe("");
+  });
+
+  test("no command prints usage to stderr and exits 2", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: [] })).toBe(EXIT.USAGE);
+    expect(io.stderr.text()).toContain("Commands");
+  });
+
+  test("an unknown command prints usage to stderr and exits 2", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: ["nope"] })).toBe(EXIT.USAGE);
+    expect(io.stderr.text()).toContain(`unknown command "nope"`);
+  });
+
+  test("a bad flag exits 2 with the message on stderr and nothing on stdout", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: ["--nope"] })).toBe(EXIT.USAGE);
+    expect(io.stderr.text()).toContain("unknown flag --nope");
+    expect(io.stdout.text()).toBe("");
+  });
+
+  test("every command is listed in the usage text", async () => {
+    const io = capture();
+    await runCli({ ...io.ctx, argv: ["--help"] });
+    for (const command of COMMANDS) {
+      expect(io.stderr.text()).toContain(command.name);
+    }
+  });
+
+  test("every command is a stub that exits 1 and says so", async () => {
+    for (const command of COMMANDS) {
+      const io = capture();
+      expect(await runCli({ ...io.ctx, argv: [command.name] })).toBe(EXIT.ERROR);
+      expect(io.stderr.text()).toContain("not implemented");
+    }
+  });
+
+  test("runCli never returns a code the core does not define", async () => {
+    const codes = new Set<number>(Object.values(EXIT));
+    const io = capture();
+    const code = await runCli({ ...io.ctx, argv: ["list"] });
+    expect(codes.has(code)).toBe(true);
+  });
+});
+
+describe("src/cli hygiene", () => {
+  const CLI_ROOT = new URL("../src/cli", import.meta.url).pathname;
+  const CORE_ROOT = new URL("../src/core", import.meta.url).pathname;
+
+  function sources(root: string): Array<{ path: string; text: string }> {
+    return readdirSync(root, { recursive: true })
+      .map((entry) => String(entry))
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => ({ path: entry, text: readFileSync(join(root, entry), "utf8") }));
+  }
+
+  test("no file under src/cli writes to the real console", () => {
+    const offenders = sources(CLI_ROOT)
+      .filter((file) => /\bconsole\./.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  test("no file under src/cli imports mtcute", () => {
+    const offenders = sources(CLI_ROOT)
+      .filter((file) => file.text.includes("@mtcute"))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  test("the core never imports a front end", () => {
+    const offenders = sources(CORE_ROOT)
+      .filter((file) => /from\s+"\.\.\/(cli|tui)\//.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+});
+
+/** The value of a thrown call, or `undefined` when it did not throw. */
+function captureError(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+/** An in-memory capture of everything a `runCli` call writes. */
+function capture(): {
+  ctx: CliContext;
+  stdout: Sink;
+  stderr: Sink;
+} {
+  const stdout = sink();
+  const stderr = sink();
+  return {
+    ctx: {
+      argv: [],
+      env: {},
+      stdout,
+      stderr,
+      now: () => new Date("2026-10-11T13:04:00Z"),
+      isTTY: false,
+    },
+    stdout,
+    stderr,
+  };
+}
+
+interface Sink {
+  write(s: string): unknown;
+  text(): string;
+}
+
+function sink(): Sink {
+  const parts: string[] = [];
+  return {
+    write(chunk: string) {
+      parts.push(chunk);
+      return true;
+    },
+    text() {
+      return parts.join("");
+    },
+  };
+}
