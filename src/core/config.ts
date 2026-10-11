@@ -13,11 +13,20 @@
  *
  * - a JSON syntax error is reported *without* the parser's own message, because
  *   that message quotes the input it choked on, and the input may be the hash;
- * - a validation error's message is scrubbed against every string value found
- *   in the file before it is thrown, because valibot echoes the value it
- *   rejected ("expected number, received 0123abcd…");
+ * - a validation error's message is scrubbed against every candidate secret in
+ *   the raw *text* — every quoted run, plus every number — before it is thrown,
+ *   because valibot echoes the value it rejected ("expected number, received
+ *   0123abcd…"). Using the text rather than the parsed value is what covers
+ *   the shapes where the parsed value is unusable;
+ * - a config whose JSON root is not an object gets a fixed sentence with no
+ *   validator message at all, because there the echoed value is the whole file:
+ *   it is what a user writes when they paste the hash in and delete the braces;
  * - `resolveCredentials` returns the hash itself and nothing else, which is the
  *   one place it belongs: the argument to the login call.
+ *
+ * Where the sessions *live* is not decided here. `sessionDir` is carried as
+ * written (`null` meaning "no preference") and `resolvePaths`
+ * (src/core/session.ts) is the single place that expands `~` and applies XDG.
  *
  * Credentials come from the environment first, each half independently:
  * `CHAFF_API_ID` / `CHAFF_API_HASH` beat the file, and nothing resolves unless
@@ -29,6 +38,7 @@
  * Core rules hold: no stdout, no network, no clock.
  */
 import { readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_DELAY_MS } from "./plan";
 
@@ -47,18 +57,23 @@ export interface Config {
   maxLeave: number;
   /** The base delay between leaves; jitter is added on top (src/core/pacing.ts). */
   delayMs: number;
-  /** Where sessions live, as written in the file. `~` is the CLI's to expand. */
-  sessionDir: string;
+  /**
+   * Where sessions live, as written in the file, or `null` for "no
+   * preference". A leading `~` is kept as written: `resolvePaths`
+   * (src/core/session.ts) is the one place that expands it and applies XDG.
+   */
+  sessionDir: string | null;
 }
 
 /**
  * The values in plan/cli.md, "Config file", and nowhere else: every one of them
  * is documented, so a test can pin them and a reader can compare.
  *
- * `sessionDir` stays the literal `~/.local/share/chaff-tg` the spec writes,
- * rather than an XDG-resolved path: this is what the file says when a user asks
- * what the default is, while `resolvePaths` (src/core/session.ts) is the one
- * that knows about `XDG_DATA_HOME`.
+ * `sessionDir` is `null` rather than the literal `~/.local/share/chaff-tg`:
+ * "no preference" is the honest default, and `resolvePaths` is the single place
+ * that turns it into a path (XDG-aware, `~` expanded). plan/cli.md shows the
+ * literal because that is the directory a user sees on a default `HOME`, not
+ * because this module has a second opinion about where sessions go.
  */
 export const DEFAULT_CONFIG: Config = Object.freeze({
   apiId: null,
@@ -66,7 +81,7 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
   session: "default",
   maxLeave: DEFAULT_MAX_LEAVE,
   delayMs: DEFAULT_DELAY_MS,
-  sessionDir: "~/.local/share/chaff-tg",
+  sessionDir: null,
 });
 
 /** Why a config file was refused. Users read the message; scripts read the code. */
@@ -104,6 +119,20 @@ const sessionName = v.pipe(
 );
 
 /**
+ * A directory for the sessions: an absolute path, or one starting with `~` for
+ * the home directory. A relative one is malformed, because it would drop the
+ * session file — the whole account — into whatever directory the command ran
+ * in.
+ */
+const sessionDirPath = v.pipe(
+  v.string(),
+  v.check(
+    (value) => isAbsolute(value) || value === "~" || value.startsWith("~/"),
+    "expected an absolute path or one starting with ~",
+  ),
+);
+
+/**
  * Every key is optional, and an absent one falls back to the default. Unknown
  * keys are dropped rather than rejected, so a config written for a newer build
  * still loads here — the same forward compatibility the manifest has.
@@ -114,21 +143,76 @@ const configSchema = v.object({
   session: v.optional(sessionName),
   maxLeave: v.optional(positiveInt),
   delayMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
-  sessionDir: v.optional(nonEmpty),
+  sessionDir: v.optional(v.nullable(sessionDirPath)),
 });
 
-/** A string value is worth scrubbing from a message once it is this long. */
+/** A candidate secret is worth scrubbing out of a message once it is this long. */
 const REDACT_MIN_LENGTH = 8;
 
-/** Every string in the parsed file that could be the api hash. */
-function redactionTargets(value: unknown, depth = 0): string[] {
-  if (depth > 3 || typeof value !== "object" || value === null) return [];
-  const found: string[] = [];
-  for (const entry of Object.values(value)) {
-    if (typeof entry === "string" && entry.length >= REDACT_MIN_LENGTH) found.push(entry);
-    else found.push(...redactionTargets(entry, depth + 1));
+/** A config should be a JSON object; an array root is not one. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Every `"…"`-delimited run in the raw text, as written, escapes and all.
+ *
+ * The text is the one place a candidate secret still exists when the parsed
+ * value cannot be used: a root that is a single bare scalar, or a file whose
+ * JSON syntax is there but whose object is not.
+ */
+function quotedRuns(text: string): string[] {
+  const runs: string[] = [];
+  for (const match of text.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+    const run = match[1];
+    if (run !== undefined) runs.push(run);
   }
-  return found;
+  return runs;
+}
+
+/** Every number in the parsed value, as valibot would echo it back. */
+function numbersIn(value: unknown, depth = 0): string[] {
+  if (typeof value === "number") return [String(value)];
+  if (depth > 3 || !isRecord(value)) return [];
+  return Object.values(value).flatMap((entry) => numbersIn(entry, depth + 1));
+}
+
+/**
+ * Every property name in the parsed value. A name is not a secret; it is the
+ * actionable half of the message ("malformed at \"maxLeave\""), so it must
+ * survive even when it is long enough to look like one.
+ */
+function propertyNames(value: unknown, depth = 0): string[] {
+  if (depth > 3 || !isRecord(value)) return [];
+  const names = Object.keys(value);
+  for (const entry of Object.values(value)) names.push(...propertyNames(entry, depth + 1));
+  return names;
+}
+
+/**
+ * Every candidate secret in the file, as fragments to scrub from a message.
+ *
+ * Harvested from the raw text and the parsed value together, because neither
+ * holds all of them: the text has what the parser refused, the value has the
+ * numbers valibot echoes. A run is kept in both spellings — the source text and
+ * its decoded form — since a message can carry either. Property names are
+ * excluded: they are keys, and a key is never the echo.
+ */
+function redactionTargets(text: string, raw: unknown): string[] {
+  const spelled = quotedRuns(text);
+  const candidates = [...spelled, ...numbersIn(raw)];
+  for (const run of spelled) {
+    try {
+      const decoded: unknown = JSON.parse(`"${run}"`);
+      if (typeof decoded === "string") candidates.push(decoded);
+    } catch {
+      // An unterminated run: the source spelling is all there is to scrub.
+    }
+  }
+  const names = new Set(propertyNames(raw));
+  return candidates.filter(
+    (candidate) => candidate.length >= REDACT_MIN_LENGTH && !names.has(candidate),
+  );
 }
 
 /** Replace every candidate secret in `message`, so no fragment of one survives. */
@@ -142,6 +226,33 @@ function redact(message: string, secrets: readonly string[]): string {
 function unreadableReason(error: unknown): string {
   const code = (error as NodeJS.ErrnoException).code;
   return typeof code === "string" && code !== "" ? code : "unknown error";
+}
+
+/**
+ * The message for a file that parsed as JSON but did not validate.
+ *
+ * A non-object root gets a fixed sentence: valibot's message for one quotes the
+ * received value, and for a scalar root that value is the entire file — which
+ * is exactly what is left behind when someone pastes the api hash between the
+ * braces and then deletes the braces. An object root keeps the issue message,
+ * because naming the offending key is what makes the error actionable, but
+ * every candidate secret from the file is scrubbed out of it first.
+ */
+function malformedMessage(
+  configPath: string,
+  text: string,
+  raw: unknown,
+  issue: v.BaseIssue<unknown> | undefined,
+): string {
+  if (!isRecord(raw)) {
+    return `config at ${configPath} is malformed: expected a JSON object of the documented keys.`;
+  }
+  const where = issue === undefined ? "" : v.getDotPath(issue);
+  const detail =
+    issue === undefined
+      ? "is malformed"
+      : `is malformed${where ? ` at "${where}"` : ""}: ${issue.message}`;
+  return redact(`config at ${configPath} ${detail}`, redactionTargets(text, raw));
 }
 
 /**
@@ -172,16 +283,7 @@ export function loadConfig(configPath: string): Config {
 
   const parsed = v.safeParse(configSchema, raw);
   if (!parsed.success) {
-    const issue = parsed.issues[0];
-    const where = issue === undefined ? "" : v.getDotPath(issue);
-    const detail =
-      issue === undefined
-        ? "is malformed"
-        : `is malformed${where ? ` at "${where}"` : ""}: ${issue.message}`;
-    throw new ConfigError(
-      "malformed",
-      redact(`config at ${configPath} ${detail}`, redactionTargets(raw)),
-    );
+    throw new ConfigError("malformed", malformedMessage(configPath, text, raw, parsed.issues[0]));
   }
 
   return {

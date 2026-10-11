@@ -9,8 +9,9 @@
  * - malformed JSON and a value of the wrong type both throw `ConfigError`
  *   naming the path, with the reason in `code`;
  * - the api hash never reaches a message: not from malformed JSON (the parser
- *   quotes the input it failed on) and not from a validation failure (valibot
- *   echoes the value it rejected);
+ *   quotes the input it failed on), not from a validation failure (valibot
+ *   echoes the value it rejected), and not from a config whose JSON root is a
+ *   scalar rather than an object;
  * - credentials come from the environment first, each half independently, and
  *   nothing resolves unless both halves do.
  */
@@ -24,6 +25,10 @@ import { DEFAULT_DELAY_MS } from "../src/core/plan";
 
 /** A value with the shape of a real api hash, used to prove it never leaks. */
 const HASH = "0123456789abcdef0123456789abcdef";
+/** A letter-leading token: the one syntax error this runtime quotes back. */
+const BAREWORD = "abcdef0123456789";
+/** A digit-only hash, which valibot echoes as a number. */
+const NUMBER_HASH = "1234567890";
 /** The hash the config file carries in the precedence tests. */
 const FILE_HASH = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -70,7 +75,9 @@ describe("loadConfig", () => {
       session: "default",
       maxLeave: 50,
       delayMs: DEFAULT_DELAY_MS,
-      sessionDir: "~/.local/share/chaff-tg",
+      // `null` is "no preference": the XDG-aware default in `resolvePaths`
+      // decides, so plan/cli.md's `~/.local/share/chaff-tg` is not restated here.
+      sessionDir: null,
     });
   });
 
@@ -135,6 +142,24 @@ describe("loadConfig", () => {
     expect(failure.code).toBe("malformed");
   });
 
+  test("rejects a relative sessionDir, which would follow the command's cwd", async () => {
+    await writeFile(configPath, '{"sessionDir": "sessions"}');
+    const failure = capture(configPath) as ConfigError;
+    expect(failure.code).toBe("malformed");
+    expect(failure.message).toContain("sessionDir");
+  });
+
+  test("rejects a blank sessionDir", async () => {
+    await writeFile(configPath, '{"sessionDir": ""}');
+    const failure = capture(configPath) as ConfigError;
+    expect(failure.code).toBe("malformed");
+    expect(failure.message).toContain("sessionDir");
+  });
+
+  test("keeps a ~-prefixed sessionDir as written, for the resolver to expand", async () => {
+    expect((await load('{"sessionDir": "~/sessions"}')).sessionDir).toBe("~/sessions");
+  });
+
   test("throws ConfigError when the path is a directory, not a file", () => {
     const failure = capture(dir) as ConfigError;
     expect(failure).toBeInstanceOf(ConfigError);
@@ -144,26 +169,51 @@ describe("loadConfig", () => {
 });
 
 describe("the api hash never reaches a message", () => {
-  const LEAKY: Array<[string, string]> = [
-    ["unterminated JSON", `{"apiHash": "${HASH}",`],
-    ["truncated JSON", `{"apiHash": "${HASH}"`],
-    ["a rejected string value", `{"apiId": "${HASH}"}`],
-    ["a sibling key failing", `{"apiHash": "${HASH}", "maxLeave": "many"}`],
-    ["a string in a number's slot", `{"delayMs": "${HASH}"}`],
+  /**
+   * The third column is the fragment a message would quote if the code ever
+   * forwarded a validator or parser message verbatim, so a regression that
+   * reinstated one fails here rather than shipping green.
+   */
+  const LEAKY: Array<[string, string, string]> = [
+    ["unterminated JSON", `{"apiHash": "${HASH}",`, HASH],
+    ["truncated JSON", `{"apiHash": "${HASH}"`, HASH],
+    ["a rejected string value", `{"apiId": "${HASH}"}`, HASH],
+    ["a sibling key failing", `{"apiHash": "${HASH}", "maxLeave": "many"}`, HASH],
+    ["a string in a number's slot", `{"delayMs": "${HASH}"}`, HASH],
+    // The one syntax error this runtime quotes back: JSON.parse says
+    // `Unexpected identifier "abcdef0123456789"`, so this row fails if the
+    // parser's own message is ever forwarded.
+    ["a bareword in the hash's slot", `{"apiHash": ${BAREWORD}}`, BAREWORD],
+    // The braces deleted while pasting the hash in: the whole file is the value.
+    ["a scalar root", `"${HASH}"`, HASH],
+    ["a numeric root", NUMBER_HASH, NUMBER_HASH],
   ];
 
-  for (const [name, text] of LEAKY) {
+  for (const [name, text, token] of LEAKY) {
     test(`does not leak it from ${name}`, async () => {
       await writeFile(configPath, text);
       const failure = capture(configPath) as ConfigError;
       expect(failure).toBeInstanceOf(ConfigError);
-      expect(failure.message).not.toContain(HASH);
+      expect(failure.message).not.toContain(token);
       // Not even a prefix: quoting eight characters is already a leak.
-      expect(failure.message).not.toContain(HASH.slice(0, 8));
+      expect(failure.message).not.toContain(token.slice(0, 8));
+      // Nothing forwards the parser's own message either, whatever it said.
+      expect(failure.message).not.toContain("JSON Parse error");
+      expect(failure.message).not.toContain("Unexpected identifier");
       // The message is still useful: it names the file.
       expect(failure.message).toContain(configPath);
     });
   }
+
+  test("refuses a scalar root with a fixed sentence, never the received value", async () => {
+    // Imagining the trigger: someone edits config.json to add the hash and
+    // deletes the surrounding braces, so the file is one bare scalar.
+    await writeFile(configPath, `"${HASH}"`);
+    const failure = capture(configPath) as ConfigError;
+    expect(failure.code).toBe("malformed");
+    expect(failure.message).toContain("expected a JSON object");
+    expect(failure.message).not.toContain(HASH);
+  });
 });
 
 describe("resolveCredentials", () => {

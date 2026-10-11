@@ -17,9 +17,17 @@
  *
  * Paths follow the XDG base directory spec: `XDG_DATA_HOME` / `XDG_CONFIG_HOME`
  * when they are set to an absolute path, `~/.local/share` and `~/.config`
- * otherwise. Both are read from the injected env, never from the ambient
+ * otherwise. A `sessionDir` a config file asks for replaces that data
+ * directory, and this is the one place that expands it, so there is one answer
+ * to "where do sessions live" (`loadConfig`, src/core/config.ts, only carries
+ * the user's wish — `null` meaning "no preference"). Both the environment and
+ * the home directory come from the injected env, never from the ambient
  * `process.env` inside the functions, so a test can point the whole module at a
  * temporary root and never touch the real `~/.local/share/chaff-tg`.
+ *
+ * The journal is one SQLite database *per data directory*, not one per session
+ * (`journalPath`, src/core/journal.ts, plan/architecture.md), which is why its
+ * path takes no name and why `chaff logout` can remove it (plan/safety.md).
  *
  * Core rules hold (plan/architecture.md, "Repo layout"): nothing here imports
  * from `src/cli` or `src/tui`, and nothing here writes to stdout or stderr.
@@ -41,8 +49,8 @@ const APP_DIR = "chaff-tg";
 /** The session file: `<name>.session`, the name mtcute is handed. */
 const SESSION_SUFFIX = ".session";
 
-/** The journal database, beside the session file (plan/safety.md, the table). */
-const JOURNAL_SUFFIX = ".journal.db";
+/** The journal database: one per data directory, shared by its sessions. */
+const JOURNAL_FILE = "journal.db";
 
 /** The files SQLite leaves beside a database, which a logout has to take too. */
 const SQLITE_SIBLINGS = ["-wal", "-shm", "-journal"] as const;
@@ -52,14 +60,18 @@ const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** The resolved local state. Every path is absolute; none of them is a secret. */
 export interface Paths {
-  /** The session directory: mode 700, holds the sessions and the journal. */
+  /** The data directory: mode 700, holds the sessions and the one journal. */
   dataDir: string;
   /** The optional config file (`loadConfig`, src/core/config.ts). */
   configPath: string;
   /** The session file for `name`, which the Telegram client opens. */
   sessionPath(name: string): string;
-  /** The resume journal for `name`, a separate SQLite database. */
-  journalPath(name: string): string;
+  /**
+   * The one resume journal for this data directory: `<dataDir>/journal.db`
+   * (src/core/journal.ts). Not per session — it records every run in the
+   * directory, so `chaff logout` has exactly one file to remove.
+   */
+  journalPath(): string;
 }
 
 /** The home directory to fall back to, ignoring a relative or blank `HOME`. */
@@ -91,19 +103,51 @@ function safeName(name: string): string {
 }
 
 /**
+ * The data directory a configured `sessionDir` asks for: a leading `~` expands
+ * to the home directory from the injected env, and an absolute path is taken as
+ * it is.
+ *
+ * A relative or blank value cannot reach here from a config file — valibot
+ * refuses it as malformed first — but a front end can also assemble one, and a
+ * relative directory would scatter the session file (the whole account) through
+ * whatever directory the command ran in.
+ */
+function configuredDataDir(value: string, home: string): string {
+  if (value === "~") return home;
+  if (value.startsWith("~/")) return join(home, value.slice(2));
+  if (!isAbsolute(value)) {
+    throw new Error(
+      `invalid sessionDir ${JSON.stringify(value)}: expected an absolute path or one starting with ~`,
+    );
+  }
+  return value;
+}
+
+/**
  * Resolve every local path from the environment, defaulting to the ambient one.
  * Nothing here reads the filesystem: a path that does not exist yet is still a
  * path, and `ensureSecureDir` is what makes the directory real.
+ *
+ * `sessionDir` is the config's value (src/core/config.ts): `null` or omitted
+ * means the XDG-aware default, and anything else replaces the data directory
+ * (sessions and journal together, because they live in one place).
  */
-export function resolvePaths(env: Record<string, string | undefined> = process.env): Paths {
+export function resolvePaths(
+  env: Record<string, string | undefined> = process.env,
+  sessionDir?: string | null,
+): Paths {
   const home = homeDir(env);
-  const dataDir = join(xdgRoot(env.XDG_DATA_HOME, join(home, ".local", "share")), APP_DIR);
+  const fallback = join(xdgRoot(env.XDG_DATA_HOME, join(home, ".local", "share")), APP_DIR);
+  const dataDir =
+    sessionDir === undefined || sessionDir === null
+      ? fallback
+      : configuredDataDir(sessionDir, home);
   const configDir = join(xdgRoot(env.XDG_CONFIG_HOME, join(home, ".config")), APP_DIR);
   return {
     dataDir,
     configPath: join(configDir, "config.json"),
     sessionPath: (name) => join(dataDir, `${safeName(name)}${SESSION_SUFFIX}`),
-    journalPath: (name) => join(dataDir, `${safeName(name)}${JOURNAL_SUFFIX}`),
+    journalPath: () => join(dataDir, JOURNAL_FILE),
   };
 }
 
@@ -156,9 +200,10 @@ async function remove(path: string): Promise<boolean> {
  * `-journal` files SQLite leaves beside it. Any of them counts as something to
  * remove, so an interrupted run's leftovers are reported rather than ignored.
  *
- * The journal database is deliberately not touched here — `chaff logout`
- * composes that step (plan/safety.md, "Logging") — because a session can be
- * re-created without discarding the run history.
+ * The journal database is deliberately not touched here — it is shared by every
+ * session in the data directory, and `chaff logout` composes that step
+ * (plan/safety.md, "Logging") — because a session can be re-created without
+ * discarding the run history.
  */
 export async function removeSession(p: Paths, name: string): Promise<boolean> {
   const base = p.sessionPath(name);

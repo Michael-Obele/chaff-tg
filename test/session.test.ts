@@ -6,7 +6,9 @@
  * Contract under test:
  * - `resolvePaths` honors `XDG_DATA_HOME` / `XDG_CONFIG_HOME` when they are
  *   absolute, and falls back to `~/.local/share` / `~/.config`; the session and
- *   the journal both live in the data directory.
+ *   the one journal live in the data directory.
+ * - A `sessionDir` a config file asks for replaces that data directory, with a
+ *   leading `~` expanded to the home directory; a relative one is refused.
  * - `ensureSecureDir` creates a missing directory mode 700 and leaves an
  *   existing one exactly as it found it — created with the mode, never fixed up.
  * - `ensureSession` pre-creates the session file mode 600, so the store that
@@ -61,9 +63,11 @@ describe("resolvePaths", () => {
     expect(paths.configPath).toBe(join(root, "config", "chaff-tg", "config.json"));
   });
 
-  test("keeps the session and the journal in the data directory", () => {
+  test("keeps the session and the one journal in the data directory", () => {
     expect(paths.sessionPath("work")).toBe(join(root, "data", "chaff-tg", "work.session"));
-    expect(paths.journalPath("work")).toBe(join(root, "data", "chaff-tg", "work.journal.db"));
+    // One journal per data directory, never one per session: `src/core/journal.ts`
+    // documents a single database, and plan/safety.md has `chaff logout` remove it.
+    expect(paths.journalPath()).toBe(join(root, "data", "chaff-tg", "journal.db"));
   });
 
   test("falls back to ~/.local/share and ~/.config when the XDG vars are unset", () => {
@@ -88,6 +92,35 @@ describe("resolvePaths", () => {
     expect(() => paths.sessionPath("nested/work")).toThrow();
     expect(() => paths.sessionPath(".")).toThrow();
     expect(() => paths.sessionPath("")).toThrow();
+  });
+});
+
+describe("the session directory a config file asks for", () => {
+  test("uses the XDG-aware default when the config has no opinion", () => {
+    // `null` is the config saying "no preference", not a directory called "null".
+    expect(resolvePaths(env, null).dataDir).toBe(paths.dataDir);
+    expect(resolvePaths(env, undefined).dataDir).toBe(paths.dataDir);
+    expect(paths.dataDir).toBe(join(root, "data", "chaff-tg"));
+  });
+
+  test("honors an absolute sessionDir", () => {
+    const configured = join(root, "elsewhere");
+    const resolved = resolvePaths(env, configured);
+    expect(resolved.dataDir).toBe(configured);
+    expect(resolved.sessionPath("work")).toBe(join(configured, "work.session"));
+    expect(resolved.journalPath()).toBe(join(configured, "journal.db"));
+    // The config file is not session state, so it stays where XDG put it.
+    expect(resolved.configPath).toBe(paths.configPath);
+  });
+
+  test("expands a leading ~ to the home directory", () => {
+    const home = join(root, "home");
+    expect(resolvePaths(env, "~/sessions").dataDir).toBe(join(home, "sessions"));
+    expect(resolvePaths(env, "~").dataDir).toBe(home);
+  });
+
+  test("refuses a relative sessionDir instead of using the working directory", () => {
+    expect(() => resolvePaths(env, "sessions")).toThrow();
   });
 });
 
