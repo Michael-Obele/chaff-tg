@@ -19,8 +19,14 @@
  * original snippet") are visible in the field mapping: `dialog.peer` and not
  * `dialog.chat`, `chat.chatType` and not `chat.type`, `iterDialogs` and not
  * `getDialogs`.
+ *
+ * Field *names* are not left to that reading alone: {@link normalizeDialog}
+ * takes a {@link RawDialog}, a `Pick` of the library's own `Dialog`, so a
+ * rename or retype upstream fails `tsc --noEmit` instead of quietly defaulting
+ * every chat. Field *values* are still validated at runtime.
  */
 import { TelegramClient } from "@mtcute/bun";
+import type { Chat, Dialog } from "@mtcute/core";
 import type { Account, ChatRecord, ChatType } from "./types";
 
 /**
@@ -149,18 +155,28 @@ export class TelegramApi {
 // below, and the only output is a value.
 //
 
-/** The `chatType` values Telegram reports (`Chat.chatType`, plan/architecture.md). */
-const CHAT_TYPES: readonly ChatType[] = [
-  "group",
-  "supergroup",
-  "channel",
-  "gigagroup",
-  "monoforum",
-  "community",
-];
+/**
+ * The `chatType` values Telegram reports, as one checked table
+ * (`Chat.chatType`, plan/architecture.md).
+ *
+ * The `satisfies` is the point of the object: the runtime list and the closed
+ * `ChatType` union (src/core/types.ts) cannot drift apart, because a new member
+ * of either one fails `tsc` here — a missing key when the union grows, an
+ * excess one when mtcute grows a chat kind first. The `readonly ChatType[]`
+ * this replaces checked neither direction, and the failure it left behind was a
+ * *runtime* refusal of a legitimate chat, which aborts the whole listing.
+ */
+const CHAT_TYPES = {
+  group: true,
+  supergroup: true,
+  channel: true,
+  gigagroup: true,
+  monoforum: true,
+  community: true,
+} satisfies Record<ChatType, true> & Record<Chat["chatType"], true>;
 
 function isChatType(value: string): value is ChatType {
-  return (CHAT_TYPES as readonly string[]).includes(value);
+  return Object.hasOwn(CHAT_TYPES, value);
 }
 
 type RawObject = Record<string, unknown>;
@@ -168,11 +184,11 @@ type RawObject = Record<string, unknown>;
 /**
  * Structural readers.
  *
- * `normalizeDialog` takes `unknown`, not `Dialog`: this is the boundary between
- * a library chaff-tg does not own and the plain data the core does, so it reads
- * what it found instead of trusting a declared shape. The fixtures are plain
- * JSON objects for the same reason, which means every read here has to survive
- * a missing key.
+ * `normalizeDialog` reads *values* through these, never field names: the input
+ * type ({@link RawDialog}) carries mtcute's own names and types, but a fixture
+ * or a hand-built dialog reaches this module through one cast at its own
+ * boundary, so nothing here trusts a declared shape at run time. That is why
+ * every read has to survive a missing key.
  */
 function asObject(value: unknown): RawObject | null {
   return typeof value === "object" && value !== null ? (value as RawObject) : null;
@@ -215,11 +231,41 @@ function isoUtcOrNull(value: unknown): string | null {
  *
  * `Chat` and `User` both carry a literal `type` — `"chat"`
  * (`types/peers/chat.d.ts:21`) and `"user"` (`types/peers/user.d.ts:25`) — and
- * `Dialog.peer` is `User | Chat` (`types/peers/peer.d.ts:29`).
+ * `Dialog.peer` is `User | Chat` (`types/peers/peer.d.ts:29`). `iterDialogs`
+ * hands its values over as `unknown`, so this predicate is what carries one
+ * across into the typed normalizer; it is deliberately partial, and
+ * {@link normalizeDialog} still validates every field it reads.
  */
-function isChatDialog(raw: unknown): boolean {
+function isChatDialog(raw: unknown): raw is RawDialog {
   return asObject(asObject(raw)?.["peer"])?.["type"] === "chat";
 }
+
+/**
+ * The runtime half of {@link RawDialog}: the type says the keys exist, but a
+ * fixture reaches this module through a cast the compiler cannot check, so the
+ * object itself is tested before its keys are read. Not a cast — a property
+ * test, which is the only thing that can be honest about a value from JSON.
+ */
+function isDialogLike(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "peer" in value;
+}
+
+/**
+ * What `normalizeDialog` reads out of one raw mtcute `Dialog`, taken from the
+ * library's own class instead of restated by hand.
+ *
+ * This alias is the guarantee: the members below are mtcute's names with
+ * mtcute's types, so `tsc --noEmit` fails the build when the library renames or
+ * retypes one of them, rather than the seam silently defaulting every chat to
+ * `null`/`false`/`0` with the suite still green. A structural `Pick` (rather
+ * than `Dialog` itself) keeps the JSON fixtures castable at their own boundary
+ * without inventing a second shape: a real `Dialog` satisfies it, and
+ * `createClient` still proves that in one line.
+ */
+export type RawDialog = Pick<
+  Dialog,
+  "peer" | "isMuted" | "isArchived" | "isPinned" | "unreadCount" | "lastMessage"
+>;
 
 /**
  * One raw mtcute `Dialog` as a `ChatRecord`.
@@ -229,30 +275,34 @@ function isChatDialog(raw: unknown): boolean {
  * or a `chatType` outside the six the core knows. Both are caller errors worth
  * naming loudly rather than mislabelling a chat into the wrong filter bucket.
  *
+ * Field names are compile-checked through {@link RawDialog}; field values are
+ * still validated here, because the one cast that gets a fixture this far is
+ * outside the compiler's reach. `muted` carries the bit mtcute computed when
+ * the dialog was read (the library resolves a mute's expiry against its own
+ * clock), so a `ChatRecord` is not a clock-free snapshot.
+ *
  * `neverPosted` is deliberately absent, not `false`: finding out whether the
  * account ever posted in a chat costs one request per chat, so it is opt-in and
  * a later task fills it in.
  */
-export function normalizeDialog(raw: unknown): ChatRecord {
-  const dialog = asObject(raw);
-  const peer = asObject(dialog?.["peer"]);
-
-  if (peer === null) {
+export function normalizeDialog(raw: RawDialog): ChatRecord {
+  if (!isDialogLike(raw)) {
     throw new TypeError("normalizeDialog: expected a dialog object with a peer");
   }
 
-  if (peer["type"] !== "chat") {
+  const peer = raw.peer;
+  if (peer.type !== "chat") {
     throw new TypeError(
-      `normalizeDialog: peer is not a chat (type ${JSON.stringify(peer["type"])}); private chats cannot be left`,
+      `normalizeDialog: peer is not a chat (type ${JSON.stringify(peer.type)}); private chats cannot be left`,
     );
   }
 
-  const id = asNumber(peer["id"]);
+  const id = asNumber(peer.id);
   if (id === null) {
     throw new TypeError("normalizeDialog: chat peer has no numeric id");
   }
 
-  const chatType = asString(peer["chatType"]);
+  const chatType = asString(peer.chatType);
   if (chatType === null || !isChatType(chatType)) {
     throw new TypeError(`normalizeDialog: unknown chatType ${JSON.stringify(chatType)}`);
   }
@@ -262,16 +312,16 @@ export function normalizeDialog(raw: unknown): ChatRecord {
     type: chatType,
     // `Chat.displayName` is the alias of `Chat.title` (chat.d.ts:164); accept
     // either spelling so a hand-built dialog is not a special case.
-    title: asString(peer["displayName"]) ?? asString(peer["title"]) ?? "",
-    username: asString(peer["username"]),
-    members: asNumber(peer["membersCount"]),
-    muted: asBoolean(dialog?.["isMuted"]),
-    archived: asBoolean(dialog?.["isArchived"]) ?? false,
-    pinned: asBoolean(dialog?.["isPinned"]) ?? false,
-    unread: asNumber(dialog?.["unreadCount"]) ?? 0,
-    isScam: asBoolean(peer["isScam"]) ?? false,
-    isFake: asBoolean(peer["isFake"]) ?? false,
-    isVerified: asBoolean(peer["isVerified"]) ?? false,
-    lastMessageAt: isoUtcOrNull(asObject(dialog?.["lastMessage"])?.["date"]),
+    title: asString(peer.displayName) ?? asString(peer.title) ?? "",
+    username: asString(peer.username),
+    members: asNumber(peer.membersCount),
+    muted: asBoolean(raw.isMuted),
+    archived: asBoolean(raw.isArchived) ?? false,
+    pinned: asBoolean(raw.isPinned) ?? false,
+    unread: asNumber(raw.unreadCount) ?? 0,
+    isScam: asBoolean(peer.isScam) ?? false,
+    isFake: asBoolean(peer.isFake) ?? false,
+    isVerified: asBoolean(peer.isVerified) ?? false,
+    lastMessageAt: isoUtcOrNull(raw.lastMessage?.date),
   };
 }

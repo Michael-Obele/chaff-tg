@@ -16,9 +16,15 @@
  *   in this file opens a socket.
  */
 import { describe, expect, test } from "bun:test";
-import { classify } from "../src/core/errors";
-import { normalizeDialog, TelegramApi, type TelegramClientLike } from "../src/core/telegram";
+import { EXIT, classify } from "../src/core/errors";
+import {
+  normalizeDialog,
+  TelegramApi,
+  type RawDialog,
+  type TelegramClientLike,
+} from "../src/core/telegram";
 import type { ChatRecord } from "../src/core/types";
+import { FakeClient as ShippedFakeClient } from "../src/fakes/client";
 import { FakeClient, fakeRpcError, type FakeClientOptions } from "./fake-client";
 
 type Raw = Record<string, unknown>;
@@ -43,6 +49,15 @@ function rawById(id: number): Raw {
   const row = raws.find((raw) => peerOf(raw)["id"] === id);
   if (row === undefined) throw new Error(`raw fixture row ${id} is missing`);
   return row;
+}
+
+/**
+ * `raw-dialogs.json` is JSON, so its rows arrive untyped. This is the boundary
+ * where a test tells the compiler which shape it is holding: `normalizeDialog`
+ * declares its input in mtcute's own types and casts nothing itself.
+ */
+function asRawDialog(value: unknown): RawDialog {
+  return value as RawDialog;
 }
 
 const byId = new Map(chats.map((chat) => [chat.id, chat]));
@@ -109,19 +124,19 @@ describe("normalizeDialog", () => {
   for (const { raw, expected } of mirrored) {
     test(`normalizes ${expected.id} (${expected.type}) to its dialogs.json record`, () => {
       const { neverPosted: _neverPosted, ...want } = expected;
-      expect(normalizeDialog(raw)).toEqual(canonicalLastMessage(want));
+      expect(normalizeDialog(asRawDialog(raw))).toEqual(canonicalLastMessage(want));
     });
   }
 
   test("neverPosted is left absent: it costs one request per chat", () => {
     for (const raw of raws) {
       if (peerOf(raw)["type"] !== "chat") continue;
-      expect(Object.hasOwn(normalizeDialog(raw), "neverPosted")).toBe(false);
+      expect(Object.hasOwn(normalizeDialog(asRawDialog(raw)), "neverPosted")).toBe(false);
     }
   });
 
   test("a chat with every optional property missing gets the documented defaults", () => {
-    expect(normalizeDialog(rawById(-2002))).toEqual({
+    expect(normalizeDialog(asRawDialog(rawById(-2002)))).toEqual({
       id: -2002,
       type: "group",
       title: "Bare Minimum",
@@ -139,50 +154,58 @@ describe("normalizeDialog", () => {
   });
 
   test("a last message without a date is not a timestamp", () => {
-    expect(normalizeDialog(rawById(-2003)).lastMessageAt).toBeNull();
+    expect(normalizeDialog(asRawDialog(rawById(-2003))).lastMessageAt).toBeNull();
   });
 
   test("a live client's Date is normalized to ISO 8601 UTC", () => {
-    const raw = { ...rawById(-2002), lastMessage: { date: new Date("2026-10-11T09:30:00Z") } };
+    const raw = asRawDialog({
+      ...rawById(-2002),
+      lastMessage: { date: new Date("2026-10-11T09:30:00Z") },
+    });
     expect(normalizeDialog(raw).lastMessageAt).toBe("2026-10-11T09:30:00.000Z");
   });
 
   test("a date the seam cannot read degrades to null instead of failing mid-listing", () => {
-    const unreadable = { ...rawById(-2002), lastMessage: { date: "yesterday" } };
-    const invalid = { ...rawById(-2002), lastMessage: { date: new Date(Number.NaN) } };
+    const unreadable = asRawDialog({ ...rawById(-2002), lastMessage: { date: "yesterday" } });
+    const invalid = asRawDialog({
+      ...rawById(-2002),
+      lastMessage: { date: new Date(Number.NaN) },
+    });
     expect(normalizeDialog(unreadable).lastMessageAt).toBeNull();
     expect(normalizeDialog(invalid).lastMessageAt).toBeNull();
   });
 
   test("a missing title is an empty title, not a crash", () => {
-    const raw = { peer: { type: "chat", id: -3003, chatType: "group" } };
+    const raw = asRawDialog({ peer: { type: "chat", id: -3003, chatType: "group" } });
     expect(normalizeDialog(raw).title).toBe("");
   });
 });
 
 describe("normalizeDialog refuses what a ChatRecord cannot describe", () => {
   test("a private chat (user peer) is not a chat", () => {
-    expect(() => normalizeDialog(rawById(424242))).toThrow(/not a chat/);
+    expect(() => normalizeDialog(asRawDialog(rawById(424242)))).toThrow(/not a chat/);
   });
 
   test("a dialog with no peer at all", () => {
-    expect(() => normalizeDialog({ isMuted: false, unreadCount: 3 })).toThrow(
+    expect(() => normalizeDialog(asRawDialog({ isMuted: false, unreadCount: 3 }))).toThrow(
       /expected a dialog object with a peer/,
     );
   });
 
   test("a chat peer with no numeric id", () => {
-    const raw = { peer: { type: "chat", chatType: "group", displayName: "No Id" } };
+    const raw = asRawDialog({ peer: { type: "chat", chatType: "group", displayName: "No Id" } });
     expect(() => normalizeDialog(raw)).toThrow(/no numeric id/);
   });
 
   test("a chatType outside the six the core knows is refused, not mislabelled", () => {
-    const raw = { peer: { type: "chat", id: -3001, chatType: "forum", displayName: "New Kind" } };
+    const raw = asRawDialog({
+      peer: { type: "chat", id: -3001, chatType: "forum", displayName: "New Kind" },
+    });
     expect(() => normalizeDialog(raw)).toThrow(/unknown chatType/);
   });
 
   test("an absent chatType is refused too", () => {
-    const raw = { peer: { type: "chat", id: -3002, displayName: "Unlabelled" } };
+    const raw = asRawDialog({ peer: { type: "chat", id: -3002, displayName: "Unlabelled" } });
     expect(() => normalizeDialog(raw)).toThrow(/unknown chatType/);
   });
 });
@@ -275,6 +298,32 @@ describe("the fake client's failure script", () => {
     const outcome = classify(await rejection(client.leaveChat(-1002)));
     expect(outcome.kind).toBe("flood-long");
     expect(outcome.floodWaitSeconds).toBe(90);
+    expect(outcome.retryable).toBe(false);
+    // The exit code the process adopts when a long flood is the final word.
+    expect(outcome.exitCode).toBe(EXIT.FLOOD);
+    expect(outcome.exitCode).toBe(5);
+  });
+
+  test("a scripted RpcError carries the fields mtcute's does", () => {
+    const error = fakeRpcError("FLOOD_WAIT_90");
+    // The library's constructor builds the message from the raw text and
+    // `fromTl` only then rewrites `.text`, so the raw form survives in
+    // `.message` — which is where `classify` reads it.
+    expect(error.message).toBe("Telegram API error 420: FLOOD_WAIT_90");
+    expect(error.code).toBe(420);
+    expect(error.text).toBe("FLOOD_WAIT_%d");
+    expect(error.seconds).toBe(90);
+
+    const peerFlood = fakeRpcError("PEER_FLOOD");
+    expect(peerFlood.message).toBe("Telegram API error 400: PEER_FLOOD");
+    expect(peerFlood.text).toBe("PEER_FLOOD");
+    expect(peerFlood.seconds).toBeUndefined();
+  });
+
+  test("the test fake is the shipped one, with the fixtures wired in", () => {
+    // `CHAFF_FAKE` runs a compiled binary, so the implementation ships; only
+    // the fixture path is test-local (task 8 review, Important 4).
+    expect(Object.getPrototypeOf(FakeClient)).toBe(ShippedFakeClient);
   });
 
   test("PEER_FLOOD and CHANNEL_PRIVATE classify the way the taxonomy expects", async () => {
