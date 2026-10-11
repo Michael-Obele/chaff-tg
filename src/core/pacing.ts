@@ -80,8 +80,13 @@ export function abortError(message = "the run was aborted"): Error {
  * Clearing the timer is the point. Without it, an abort in the middle of a
  * 1200 ms pause would leave a dangling timer behind (and keep the process
  * alive), instead of stopping the run now.
+ *
+ * Exported because it is the default for *every* pause the leave loop takes,
+ * not just the paced ones: a flood wait and a network backoff have to honour
+ * the abort signal the same way, and a caller that injects a `sleep` into
+ * `Pacer` is injecting it for those too.
  */
-function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
+export function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted === true) {
       reject(abortError());

@@ -16,7 +16,7 @@ export const VERSION = "0.1.0";
 //
 export { applyExclude, buildPlan, DEFAULT_DELAY_MS, estimateSeconds } from "./plan";
 export { Journal } from "./journal";
-export type { ActionState, PendingChat, PlannedChat, RunMode, RunRow } from "./journal";
+export type { ActionRow, ActionState, PendingChat, PlannedChat, RunMode, RunRow } from "./journal";
 export type { Account, Plan, PlanChat } from "./types";
 
 //
@@ -29,6 +29,15 @@ export { ChaffError, classify, EXIT } from "./errors";
 export type { Classified, ClassifyOptions, ErrorKind } from "./errors";
 export { abortError, Pacer, PacerCapError } from "./pacing";
 export type { PacerOptions } from "./pacing";
+
+//
+// The leave loop: the one function the CLI and the TUI both call
+// (plan/architecture.md, "The TUI seam"). It owns the cap, the abort signal,
+// the retry rules and the journal writes; a front end only reports what the
+// callback hands it, and turns the returned facts into an exit code.
+//
+export { runLeave } from "./leave";
+export type { LeaveClient, LeaveFailure, LeaveOptions, Progress, RunResult } from "./leave";
 
 //
 // Local state: where the session file lives, the modes it is born with, and the

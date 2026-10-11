@@ -64,6 +64,16 @@ export interface PendingChat {
   title: string;
 }
 
+/** One recorded action, as `chaff journal` and a resumed run read it. */
+export interface ActionRow {
+  /** The chat this row is about. */
+  id: number;
+  title: string;
+  state: ActionState;
+  /** The classified message when the state is `failed`; `null` otherwise. */
+  error: string | null;
+}
+
 /** One chat the run set out to touch, as the caller hands it to `startRun`. */
 export interface PlannedChat {
   id: number;
@@ -166,6 +176,7 @@ export class Journal {
   readonly #listRuns: ReturnType<Database["query"]>;
   readonly #latestUnfinished: ReturnType<Database["query"]>;
   readonly #pending: ReturnType<Database["query"]>;
+  readonly #actions: ReturnType<Database["query"]>;
   /** The run insert and its pending seeds, committed as one unit of work. */
   readonly #insertRun: InsertRun;
   /** The upsert and its counter refresh, committed as one unit of work. */
@@ -217,6 +228,14 @@ export class Journal {
     this.#pending = db.query(
       `select chat_id as id, title from actions
        where run_id = ? and state = 'pending' order by rowid`,
+    );
+
+    // Every row of a run, settled or not. `rowid` is insertion order, and
+    // `startRun` seeds in plan order, so this reads back the way the plan
+    // declared the chats.
+    this.#actions = db.query(
+      `select chat_id as id, title, state, error from actions
+       where run_id = ? order by rowid`,
     );
 
     const insertRun: InsertRun = (mode, filtersJson, chats, at) => {
@@ -308,6 +327,22 @@ export class Journal {
    */
   pending(runId: number): PendingChat[] {
     return this.#pending.all(runId) as PendingChat[];
+  }
+
+  /**
+   * Every action of `runId`, in plan order, settled or not.
+   *
+   * This is the read a *resumed* run needs and `pending()` cannot give it:
+   * `pending()` says what is left to do, while this says what a previous
+   * attempt already settled and *why* it settled that way, so a failure can be
+   * re-reported instead of silently retried. `chaff journal` reads the same
+   * rows.
+   *
+   * Includes `pending` rows, because a resumed run wants the whole picture and
+   * the caller can tell "untouched" from "settled" but not the reverse.
+   */
+  actions(runId: number): ActionRow[] {
+    return this.#actions.all(runId) as ActionRow[];
   }
 
   /**
