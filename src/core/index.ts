@@ -16,5 +16,5 @@ export const VERSION = "0.1.0";
 //
 export { applyExclude, buildPlan, DEFAULT_DELAY_MS, estimateSeconds } from "./plan";
 export { Journal } from "./journal";
-export type { ActionState, PendingChat, RunMode, RunRow } from "./journal";
+export type { ActionState, PendingChat, PlannedChat, RunMode, RunRow } from "./journal";
 export type { Account, Plan, PlanChat } from "./types";

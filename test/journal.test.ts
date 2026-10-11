@@ -4,9 +4,14 @@
  * privileges and files").
  *
  * Contract under test:
+ * - `startRun` takes the planned chats and seeds every one of them `pending`
+ *   in the same transaction as the `runs` row, so a run cannot exist with
+ *   zero pending rows through caller omission.
  * - Crash halfway -> `latestUnfinished()` still returns the run and
  *   `pending()` returns every untouched chat exactly once, with the ones
  *   already marked `left`/`failed`/`skipped` absent.
+ * - `latestUnfinished()` is the newest run that is unfinished *and* still has
+ *   a `pending` row: a run whose chats were all acted on is not offered.
  * - Marking the same `(run_id, chat_id)` twice updates the single row; it
  *   never inserts a second one, and the run's counters do not double count.
  * - `finishRun` sets `finished_at`; an unfinished run has it `NULL`, and
@@ -56,11 +61,13 @@ const CHATS = [
 /** The serialized filters the journal stores verbatim, never re-interpreted. */
 const FILTERS_JSON = '{"keyword":["signal"],"exclude":[-1005]}';
 
-/** Open a run over all five chats, with every chat pre-registered pending. */
+/**
+ * Start a run over the first `planned` chats. `startRun` seeds every one of
+ * them `pending` itself, in one commit with the `runs` row, so there is no
+ * caller-side seeding loop here that a caller could forget.
+ */
 function startedRun(j: Journal, planned = 5): number {
-  const runId = j.startRun("leave", FILTERS_JSON, planned);
-  for (const chat of CHATS.slice(0, planned)) j.mark(runId, chat, "pending");
-  return runId;
+  return j.startRun("leave", FILTERS_JSON, CHATS.slice(0, planned));
 }
 
 /** Row count in `actions`, read with a second connection (white box). */
@@ -127,9 +134,7 @@ describe("startRun and listRuns", () => {
     const first = startedRun(j);
     j.finishRun(first);
 
-    const second = j.startRun("dry-run", FILTERS_JSON, 2);
-    j.mark(second, CHATS[0]!, "pending");
-    j.mark(second, CHATS[1]!, "pending");
+    const second = j.startRun("dry-run", FILTERS_JSON, CHATS.slice(0, 2));
     j.mark(second, CHATS[0]!, "left");
     j.mark(second, CHATS[1]!, "failed", "FLOOD_WAIT_90");
 
@@ -151,6 +156,33 @@ describe("startRun and listRuns", () => {
   test("listRuns is empty on a fresh journal", () => {
     const j = Journal.open(tempJournalPath(), fixedClock);
     expect(j.listRuns()).toEqual([]);
+    expect(j.latestUnfinished()).toBeNull();
+    j.close();
+  });
+
+  test("startRun seeds every planned chat pending, in plan order, as rows", () => {
+    const path = tempJournalPath();
+    const j = Journal.open(path, fixedClock);
+    const runId = j.startRun("leave", FILTERS_JSON, CHATS);
+
+    expect(j.listRuns()[0]!.planned).toBe(5);
+    expect(j.pending(runId)).toEqual(CHATS.map((chat) => ({ id: chat.id, title: chat.title })));
+    // The rows are really on disk, not only in the accessor's cache.
+    expect(actionRows(path)).toBe(5);
+    j.close();
+  });
+
+  test("a run row never lands without its pending rows (one transaction)", () => {
+    const path = tempJournalPath();
+    const j = Journal.open(path, fixedClock);
+    // `chat_id` is NOT NULL, so seeding this chat fails mid-way through the
+    // seed loop. Because the seed is one transaction with the run insert, the
+    // whole thing rolls back: no run can exist whose pending() is silently [].
+    expect(() =>
+      j.startRun("leave", FILTERS_JSON, [{ id: null as unknown as number, title: "bad" }]),
+    ).toThrow();
+    expect(j.listRuns()).toEqual([]);
+    expect(actionRows(path)).toBe(0);
     expect(j.latestUnfinished()).toBeNull();
     j.close();
   });
@@ -198,6 +230,33 @@ describe("crash halfway and resume", () => {
     expect(j.pending(404)).toEqual([]);
     j.close();
   });
+
+  test("resume after reopen: mark the remainder, then the run is not offered", () => {
+    const path = tempJournalPath();
+    const before = Journal.open(path, fixedClock);
+    const runId = before.startRun("leave", FILTERS_JSON, CHATS);
+    before.mark(runId, CHATS[0]!, "left");
+    before.mark(runId, CHATS[1]!, "left");
+    before.close();
+
+    // The real resume path: open the existing file and finish the run's work.
+    const after = Journal.open(path, fixedClock);
+    expect(after.latestUnfinished()!.id).toBe(runId);
+    expect(after.pending(runId).map((c) => c.id)).toEqual([-1003, -1004, -1005]);
+
+    for (const chat of after.pending(runId)) after.mark(runId, chat, "left");
+    expect(after.pending(runId)).toEqual([]);
+    expect(after.listRuns()[0]!.left).toBe(5);
+
+    // Unfinished but complete: no pending row, so no confusing no-op offer.
+    expect(after.listRuns()[0]!.finishedAt).toBeNull();
+    expect(after.latestUnfinished()).toBeNull();
+
+    after.finishRun(runId);
+    expect(after.latestUnfinished()).toBeNull();
+    expect(after.listRuns()[0]!.finishedAt).toBe(FIXED_ISO);
+    after.close();
+  });
 });
 
 describe("idempotent marking", () => {
@@ -244,11 +303,12 @@ describe("idempotent marking", () => {
     j.close();
   });
 
-  test("a chat can be marked left without ever being marked pending", () => {
+  test("mark moves a seeded chat straight to left, leaving the rest pending", () => {
     const j = Journal.open(tempJournalPath(), fixedClock);
-    const runId = j.startRun("leave", FILTERS_JSON, 5);
+    const runId = startedRun(j);
     j.mark(runId, CHATS[4]!, "left");
     expect(j.listRuns()[0]!.left).toBe(1);
+    expect(j.pending(runId).map((c) => c.id)).toEqual([-1001, -1002, -1003, -1004]);
     j.close();
   });
 });
@@ -273,9 +333,26 @@ describe("finishRun and latestUnfinished", () => {
     const second = startedRun(j);
     expect(j.latestUnfinished()!.id).toBe(second);
 
-    const third = j.startRun("dry-run", FILTERS_JSON, 1);
+    const third = j.startRun("dry-run", FILTERS_JSON, CHATS.slice(0, 1));
     expect(j.latestUnfinished()!.id).toBe(third);
     expect(j.latestUnfinished()!.mode).toBe("dry-run");
+    j.close();
+  });
+
+  test("latestUnfinished skips an unfinished run that has no pending rows", () => {
+    const j = Journal.open(tempJournalPath(), fixedClock);
+    const runId = startedRun(j);
+    // Every chat was acted on, then the process died before finishRun: the run
+    // is unfinished but there is nothing left to resume, so it is not offered.
+    for (const chat of j.pending(runId)) j.mark(runId, chat, "left");
+
+    expect(j.listRuns()[0]!.finishedAt).toBeNull();
+    expect(j.pending(runId)).toEqual([]);
+    expect(j.latestUnfinished()).toBeNull();
+
+    // A newer run that still has work is offered again.
+    const second = startedRun(j, 2);
+    expect(j.latestUnfinished()!.id).toBe(second);
     j.close();
   });
 
@@ -300,7 +377,7 @@ describe("timestamps come from the injected clock", () => {
     const clock = (): Date => new Date(Date.UTC(2026, 0, 2, 3, 4, 5 + tick++));
 
     const j = Journal.open(path, clock);
-    const runId = j.startRun("leave", FILTERS_JSON, 1);
+    const runId = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 1));
     j.mark(runId, CHATS[0]!, "left");
     j.finishRun(runId);
 
@@ -309,7 +386,9 @@ describe("timestamps come from the injected clock", () => {
     expect(run.finishedAt).toBe("2026-01-02T03:04:07.000Z");
 
     const raw = new Database(path, { readonly: true });
-    const action = raw.query("select at from actions where run_id = ?").get(runId) as {
+    const action = raw
+      .query("select at from actions where run_id = ? and chat_id = ?")
+      .get(runId, CHATS[0]!.id) as {
       at: string;
     };
     raw.close();

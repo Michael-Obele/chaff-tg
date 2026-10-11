@@ -64,6 +64,12 @@ export interface PendingChat {
   title: string;
 }
 
+/** One chat the run set out to touch, as the caller hands it to `startRun`. */
+export interface PlannedChat {
+  id: number;
+  title: string;
+}
+
 /** The `runs` and `actions` tables, verbatim from plan/architecture.md. */
 const SCHEMA = `
 create table if not exists runs (
@@ -144,15 +150,24 @@ type RecordAction = (
   at: string,
 ) => void;
 
+/**
+ * The shape of the run-opening transaction: the `runs` row plus one `pending`
+ * `actions` row per planned chat, committed together or not at all.
+ */
+type InsertRun = (mode: RunMode, filtersJson: string, chats: PlannedChat[], at: string) => number;
+
 /** The resume log. One instance per process; one row per planned chat. */
 export class Journal {
   readonly #db: Database;
   readonly #now: () => Date;
+  readonly #insertRunRow: ReturnType<Database["query"]>;
   readonly #upsertAction: ReturnType<Database["query"]>;
   readonly #recount: ReturnType<Database["query"]>;
   readonly #listRuns: ReturnType<Database["query"]>;
   readonly #latestUnfinished: ReturnType<Database["query"]>;
   readonly #pending: ReturnType<Database["query"]>;
+  /** The run insert and its pending seeds, committed as one unit of work. */
+  readonly #insertRun: InsertRun;
   /** The upsert and its counter refresh, committed as one unit of work. */
   readonly #record: RecordAction;
   #closed = false;
@@ -160,6 +175,10 @@ export class Journal {
   private constructor(db: Database, now: () => Date) {
     this.#db = db;
     this.#now = now;
+
+    this.#insertRunRow = db.query(
+      `insert into runs (started_at, mode, filters, planned) values (?, ?, ?, ?)`,
+    );
 
     this.#upsertAction = db.query(
       `insert into actions (run_id, chat_id, title, state, error, at)
@@ -187,13 +206,30 @@ export class Journal {
 
     this.#latestUnfinished = db.query(
       `select id, started_at, finished_at, mode, planned, left, failed
-       from runs where finished_at is null order by id desc limit 1`,
+       from runs r
+       where finished_at is null
+         and exists (
+           select 1 from actions a where a.run_id = r.id and a.state = 'pending'
+         )
+       order by id desc limit 1`,
     );
 
     this.#pending = db.query(
       `select chat_id as id, title from actions
        where run_id = ? and state = 'pending' order by rowid`,
     );
+
+    const insertRun: InsertRun = (mode, filtersJson, chats, at) => {
+      const info = this.#insertRunRow.run(at, mode, filtersJson, chats.length);
+      const runId = Number(info.lastInsertRowid);
+      // One row per planned chat, in plan order: `rowid` order is insertion
+      // order, so a resume hands the chats back the way the plan declared them.
+      for (const chat of chats) {
+        this.#upsertAction.run(runId, chat.id, chat.title, "pending", null, at);
+      }
+      return runId;
+    };
+    this.#insertRun = this.#db.transaction(insertRun);
 
     const record: RecordAction = (runId, chatId, title, state, error, at) => {
       this.#upsertAction.run(runId, chatId, title, state, error, at);
@@ -225,16 +261,20 @@ export class Journal {
   }
 
   /**
-   * Record the start of a run and return its id.
+   * Open a run and return its id, seeding every planned chat `pending`.
+   *
+   * `chats` are the chats the plan selected, in plan order. The `runs` row
+   * (`planned = chats.length`) and one `actions` row per chat at
+   * `state = 'pending'` are written in a single transaction, so no run can
+   * exist without its pending rows: the record-as-you-go guarantee does not
+   * depend on a caller remembering a second seeding step. Every seed shares
+   * the run's single clock reading as its `at`.
    *
    * `filtersJson` is the manifest filters already serialized; the journal
    * stores the string verbatim and never re-interprets it.
    */
-  startRun(mode: RunMode, filtersJson: string, planned: number): number {
-    const info = this.#db
-      .query(`insert into runs (started_at, mode, filters, planned) values (?, ?, ?, ?)`)
-      .run(this.#now().toISOString(), mode, filtersJson, planned);
-    return Number(info.lastInsertRowid);
+  startRun(mode: RunMode, filtersJson: string, chats: PlannedChat[]): number {
+    return this.#insertRun(mode, filtersJson, chats, this.#now().toISOString());
   }
 
   /**
@@ -247,11 +287,9 @@ export class Journal {
    * count. `state` therefore always reflects the *last* thing that happened --
    * a failed chat that is then retried successfully reads `left`.
    *
-   * Seeding the planned chats as `pending` is the caller's job: `startRun`
-   * knows only how many there are (its signature is pinned by
-   * plan/implementation-plan.md, Task 5), so the orchestrator marks each chat
-   * `pending` before it acts and `pending()` can then hand back the untouched
-   * remainder.
+   * The caller does not seed anything: `startRun` already wrote every planned
+   * chat `pending`, and `pending()` hands back the ones this method has not
+   * moved on from.
    */
   mark(
     runId: number,
@@ -273,11 +311,14 @@ export class Journal {
   }
 
   /**
-   * The newest run that has not been finished, or `null` when there is none.
+   * The newest run that is unfinished *and* still has a `pending` row, or
+   * `null` when there is none.
    *
-   * `chaff leave` offers to continue exactly this run. Finished runs are
-   * invisible here even if they still have `pending` rows: the user ended that
-   * run, so resuming it is not what they asked for.
+   * `chaff leave` offers to continue exactly this run, and the plan's wording
+   * is "picks up any run with unfinished rows": an unfinished run whose chats
+   * were all acted on has nothing to resume, so it is not offered as a no-op.
+   * Finished runs are invisible here even if they still have `pending` rows:
+   * the user ended that run, so resuming it is not what they asked for.
    */
   latestUnfinished(): RunRow | null {
     const row = this.#latestUnfinished.get() as RunDbRow | null;
