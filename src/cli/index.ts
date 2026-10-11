@@ -17,6 +17,13 @@
  * commands; a stub says so on stderr and exits 1 (`EXIT.ERROR`), because "not
  * built yet" is an unexpected error, not a usage mistake.
  *
+ * A command never sees a raw writer. `runCli` resolves the output format and
+ * binds it to the two writers once per invocation (`output.ts`, `bindOutput`),
+ * then hands the command that sink and nothing else: the command says *what* it
+ * emits and the front end decides *where* it goes. A machine format therefore
+ * cannot be corrupted from inside a command — there is no `ctx.stdout` to write
+ * to, and no channel on the sink takes a format to override.
+ *
  * Failures are mapped in one place: bad usage exits 2, a classified
  * `ChaffError` exits with the code the core's taxonomy already chose, and
  * anything else exits 1. The core returns facts and this file turns them into
@@ -24,6 +31,7 @@
  */
 import { ChaffError, EXIT } from "../core/errors";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
+import { bindOutput, type CommandOutput } from "./output";
 import { renderUsage, type CommandBrief } from "./usage";
 
 /**
@@ -64,10 +72,20 @@ export interface CliContext {
   isTTY: boolean;
 }
 
+/**
+ * What a command may touch: everything `runCli` has, minus the two raw writers.
+ * The payload can only leave through the `CommandOutput` sink, which `runCli`
+ * already bound to a format, so a command cannot pick a stream of its own.
+ */
+export type CommandContext = Omit<CliContext, "stdout" | "stderr">;
+
 /** One command: how it is listed in the help, and what it does. */
 export interface Command extends CommandBrief {
-  /** Returns the process exit code; never calls `process.exit`. */
-  run(ctx: CliContext, args: ParsedArgs): Promise<number>;
+  /**
+   * Returns the process exit code; never calls `process.exit`. `out` is the
+   * sink bound for this invocation, and the only writer a command may use.
+   */
+  run(ctx: CommandContext, args: ParsedArgs, out: CommandOutput): Promise<number>;
 }
 
 /** A command that has not been built yet. Tasks 11-14 replace these rows. */
@@ -75,8 +93,8 @@ function stub(name: string, summary: string): Command {
   return {
     name,
     summary,
-    async run(ctx) {
-      ctx.stderr.write(`${name} is not implemented yet.\n`);
+    async run(_ctx, _args, out) {
+      out.error(`${name} is not implemented yet.\n`);
       return EXIT.ERROR;
     },
   };
@@ -114,6 +132,9 @@ function exitCodeOf(error: unknown): number {
 /**
  * Run one command line and return its exit code.
  *
+ * `commands` is the dispatch table and defaults to the real one; a test passes
+ * a probe command to drive this path without adding a row to `COMMANDS`.
+ *
  * `--version` wins over everything: it has to work even when the rest of the
  * line is nonsense, which is what a bug report needs. `--help` is a request for
  * information rather than a failure, so it prints the usage text to stdout and
@@ -121,12 +142,15 @@ function exitCodeOf(error: unknown): number {
  * cannot act on — no command, an unknown command, a flag that is unknown or
  * conflicting — are the ones that print the usage text to stderr and exit 2.
  */
-export async function runCli(ctx: CliContext): Promise<number> {
+export async function runCli(
+  ctx: CliContext,
+  commands: readonly Command[] = COMMANDS,
+): Promise<number> {
   let args: ParsedArgs;
   try {
     args = parseArgs(ctx.argv);
   } catch (error) {
-    ctx.stderr.write(`${messageOf(error)}\n\n${renderUsage(COMMANDS)}`);
+    ctx.stderr.write(`${messageOf(error)}\n\n${renderUsage(commands)}`);
     return exitCodeOf(error);
   }
 
@@ -136,23 +160,27 @@ export async function runCli(ctx: CliContext): Promise<number> {
   }
 
   if (args.flags.help) {
-    ctx.stdout.write(renderUsage(COMMANDS));
+    ctx.stdout.write(renderUsage(commands));
     return EXIT.OK;
   }
 
   if (args.command === null) {
-    ctx.stderr.write(renderUsage(COMMANDS));
+    ctx.stderr.write(renderUsage(commands));
     return EXIT.USAGE;
   }
 
-  const command = COMMANDS.find((candidate) => candidate.name === args.command);
+  const command = commands.find((candidate) => candidate.name === args.command);
   if (command === undefined) {
-    ctx.stderr.write(`unknown command ${JSON.stringify(args.command)}\n\n${renderUsage(COMMANDS)}`);
+    ctx.stderr.write(`unknown command ${JSON.stringify(args.command)}\n\n${renderUsage(commands)}`);
     return EXIT.USAGE;
   }
+
+  // One sink per invocation, bound here: every command this run dispatches gets
+  // the same routing rule, and the format is not a command's to choose.
+  const out = bindOutput(ctx, args.flags);
 
   try {
-    return await command.run(ctx, args);
+    return await command.run(ctx, args, out);
   } catch (error) {
     ctx.stderr.write(`${messageOf(error)}\n`);
     return exitCodeOf(error);

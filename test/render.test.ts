@@ -8,13 +8,7 @@ import { renderJson } from "../src/cli/render/json";
 import { renderMd } from "../src/cli/render/md";
 import { renderTable } from "../src/cli/render/table";
 import { parseArgs } from "../src/cli/args";
-import {
-  emitOutput,
-  noteOutput,
-  outputFormat,
-  renderOutput,
-  verboseOutput,
-} from "../src/cli/output";
+import { bindOutput, emitOutput, outputFormat, renderOutput } from "../src/cli/output";
 
 /**
  * The same three rows go through all four renderers, so the formats differ in
@@ -144,7 +138,7 @@ describe("outputFormat and renderOutput", () => {
   });
 });
 
-describe("emitOutput and noteOutput", () => {
+describe("emitOutput and the bound output sink", () => {
   test("writes stdout and, with --out, the same bytes to a file", () => {
     const stdout = sink();
     const file = join(mkdtempSync(join(tmpdir(), "chaff-out-")), "cleanup.md");
@@ -160,63 +154,83 @@ describe("emitOutput and noteOutput", () => {
     expect(stdout.text()).toBe("hello\n");
   });
 
-  test("noteOutput is silent under --quiet", () => {
-    const streams = { stdout: sink(), stderr: sink() };
-    noteOutput("table", streams, { quiet: true }, "Found 37 chats\n");
-    expect(streams.stdout.text()).toBe("");
-    noteOutput("table", streams, { quiet: false }, "Found 37 chats\n");
-    expect(streams.stdout.text()).toBe("Found 37 chats\n");
+  test("a note is silent under --quiet and speaks otherwise", () => {
+    const stdout = sink();
+    const stderr = sink();
+
+    bindOutput({ stdout, stderr }, parseArgs(["--quiet", "list"]).flags).note("Found 37 chats\n");
+    expect(stdout.text()).toBe("");
+
+    bindOutput({ stdout, stderr }, parseArgs(["list"]).flags).note("Found 37 chats\n");
+    expect(stdout.text()).toBe("Found 37 chats\n");
+  });
+
+  test("the sink is bound: no channel takes a format, and the round-1 helpers are gone", async () => {
+    const out = bindOutput({ stdout: sink(), stderr: sink() }, parseArgs(["--json", "list"]).flags);
+
+    // One argument per channel (what to say); where it goes is already decided.
+    // A caller-supplied format would make these arities two.
+    for (const channel of [out.payload, out.note, out.verbose, out.error]) {
+      expect(channel.length).toBe(1);
+    }
+
+    const module = await import("../src/cli/output");
+    expect("noteOutput" in module).toBe(false);
+    expect("verboseOutput" in module).toBe(false);
   });
 });
 
 /**
  * A machine format promises stdout is the payload and nothing else, so the
- * human chatter has to move to stderr. These tests drive the same two writers
- * a command gets, through the same flag parse a command gets.
+ * human chatter has to move to stderr. These tests drive the real sink a
+ * command gets, through the same flag parse a command gets.
  */
 describe("chatter stays off the machine payload", () => {
-  test("with --json -v stdout parses as JSON and the verbose line is on stderr", () => {
-    const args = parseArgs(["--json", "-v", "list"]);
+  test("with --json -v stdout parses as JSON and both chatter lines are on stderr", () => {
     const stdout = sink();
     const stderr = sink();
+    const out = bindOutput({ stdout, stderr }, parseArgs(["--json", "-v", "list"]).flags);
 
-    emitOutput(stdout, null, renderJson(TABLE));
-    verboseOutput(outputFormat(args.flags), { stdout, stderr }, args.flags, "leaving -1001\n");
+    out.payload(TABLE);
+    out.note("Found 3 chats\n");
+    out.verbose("leaving -1001\n");
 
     expect(JSON.parse(stdout.text())).toHaveLength(3);
-    expect(stderr.text()).toBe("leaving -1001\n");
+    expect(stdout.text()).toBe(renderJson(TABLE));
+    expect(stderr.text()).toBe("Found 3 chats\nleaving -1001\n");
   });
 
   test("under --csv a note goes to stderr and the payload is untouched", () => {
-    const args = parseArgs(["--csv", "list"]);
     const stdout = sink();
     const stderr = sink();
+    const out = bindOutput({ stdout, stderr }, parseArgs(["--csv", "list"]).flags);
 
-    emitOutput(stdout, null, renderCsv(TABLE));
-    noteOutput(outputFormat(args.flags), { stdout, stderr }, args.flags, "Found 3 chats\n");
+    out.payload(TABLE);
+    out.note("Found 3 chats\n");
 
     expect(stdout.text()).toBe(renderCsv(TABLE));
     expect(stderr.text()).toBe("Found 3 chats\n");
   });
 
   test("without a machine format the table and -v still share stdout", () => {
-    const args = parseArgs(["-v", "list"]);
     const stdout = sink();
     const stderr = sink();
+    const out = bindOutput({ stdout, stderr }, parseArgs(["-v", "list"]).flags);
 
-    emitOutput(stdout, null, renderTable(TABLE));
-    verboseOutput(outputFormat(args.flags), { stdout, stderr }, args.flags, "leaving -1001\n");
+    out.payload(TABLE);
+    out.note("Found 3 chats\n");
+    out.verbose("leaving -1001\n");
 
-    expect(stdout.text()).toBe(renderTable(TABLE) + "leaving -1001\n");
+    expect(stdout.text()).toBe(renderTable(TABLE) + "Found 3 chats\nleaving -1001\n");
     expect(stderr.text()).toBe("");
   });
 
   test("--quiet silences a note even on the machine format's stderr", () => {
-    const args = parseArgs(["--json", "--quiet", "list"]);
     const stdout = sink();
     const stderr = sink();
+    const out = bindOutput({ stdout, stderr }, parseArgs(["--json", "--quiet", "list"]).flags);
 
-    noteOutput(outputFormat(args.flags), { stdout, stderr }, args.flags, "Found 3 chats\n");
+    out.note("Found 3 chats\n");
 
     expect(stderr.text()).toBe("");
   });

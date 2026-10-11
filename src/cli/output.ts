@@ -17,9 +17,15 @@
  * every command print machine readable output, so under `--json`, `--csv` or
  * `--md` stdout carries the payload and nothing else, and the human chatter — a
  * note, a per-chat line — moves to stderr. Without a machine format the chatter
- * stays on stdout beside the table, as it always has. The routing lives inside
- * the chatter functions rather than in the caller, because a caller that forgets
- * is a caller that corrupts the document.
+ * stays on stdout beside the table, as it always has.
+ *
+ * `bindOutput` is what makes that promise structural instead of a habit. It is
+ * called once per `runCli` invocation, from inside `runCli`, and the object it
+ * returns is the only writer a command is handed: the format is already
+ * resolved and the two writers are already chosen, so a command can say *what*
+ * it emits and nothing about *where* it goes. No channel takes a format, which
+ * is the point — a Task-11 command cannot re-open the routing decision, and it
+ * has no raw writer to bypass it with.
  */
 import { writeFileSync } from "node:fs";
 import type { Table } from "./render/columns";
@@ -44,10 +50,16 @@ export interface OutputWriter {
   write(s: string): unknown;
 }
 
-/** The two writers a command may write to, as `CliContext` supplies them. */
+/** The two writers a command's sink is bound to, as `CliContext` supplies them. */
 export interface OutputStreams {
   stdout: OutputWriter;
   stderr: OutputWriter;
+}
+
+/** What the sink reads from the flags: the format, `--out`, and the two chatter switches. */
+export interface OutputSinkFlags extends OutputFlags {
+  quiet: boolean;
+  verbose: boolean;
 }
 
 /** The format the flags asked for. Mutually exclusive formats are a parse error. */
@@ -87,22 +99,49 @@ function chatterChannel(format: OutputFormat, streams: OutputStreams): OutputWri
   return format === "table" ? streams.stdout : streams.stderr;
 }
 
-/** A line a command prints but `--quiet` silences: a count, a path, a warning. */
-export function noteOutput(
-  format: OutputFormat,
-  streams: OutputStreams,
-  flags: { quiet: boolean },
-  text: string,
-): void {
-  if (!flags.quiet) chatterChannel(format, streams).write(text);
+/**
+ * The output sink a command is handed: one format, one pair of writers, all
+ * decided before the command runs.
+ *
+ * Every channel takes exactly one argument — the text to say — and no channel
+ * takes a format. That is the whole guarantee: a command cannot pick a stream,
+ * because it is never offered one.
+ */
+export interface CommandOutput {
+  /** Render `table` in the resolved format; write it to stdout and to `--out`'s file. */
+  payload<Row>(table: Table<Row>): void;
+  /** A human line `--quiet` silences, routed by the bound format. */
+  note(text: string): void;
+  /** A per-chat line, printed only under `-v/--verbose`, routed by the same rule. */
+  verbose(text: string): void;
+  /**
+   * A line that is never the payload, so it always goes to stderr whatever the
+   * format is; `--quiet` does not silence it (`plan/cli.md`: `--quiet` is
+   * "errors only").
+   */
+  error(text: string): void;
 }
 
-/** A per-chat line, printed only under `-v/--verbose`. */
-export function verboseOutput(
-  format: OutputFormat,
-  streams: OutputStreams,
-  flags: { verbose: boolean },
-  text: string,
-): void {
-  if (flags.verbose) chatterChannel(format, streams).write(text);
+/**
+ * Bind the resolved format and the two writers into one sink. `runCli` calls
+ * this once per invocation and hands the result to the command, so the routing
+ * is decided in one place and no caller supplies a format of its own.
+ */
+export function bindOutput(streams: OutputStreams, flags: OutputSinkFlags): CommandOutput {
+  const format = outputFormat(flags);
+  const chatter = chatterChannel(format, streams);
+  return {
+    payload<Row>(table: Table<Row>): void {
+      emitOutput(streams.stdout, flags.out, renderOutput(format, table));
+    },
+    note(text: string): void {
+      if (!flags.quiet) chatter.write(text);
+    },
+    verbose(text: string): void {
+      if (flags.verbose) chatter.write(text);
+    },
+    error(text: string): void {
+      streams.stderr.write(text);
+    },
+  };
 }

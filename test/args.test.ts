@@ -12,7 +12,12 @@ import {
   runCli,
   versionLine,
   type CliContext,
+  type Command,
+  type CommandContext,
 } from "../src/cli/index";
+import type { Table } from "../src/cli/render/columns";
+import { renderJson } from "../src/cli/render/json";
+import { renderTable } from "../src/cli/render/table";
 
 //
 // One row per flag in plan/cli.md, "Filters" -- the canonical flag names. A
@@ -332,6 +337,69 @@ describe("runCli: dispatch, version, help, and stubs", () => {
     const io = capture();
     const code = await runCli({ ...io.ctx, argv: ["list"] });
     expect(codes.has(code)).toBe(true);
+  });
+});
+
+/**
+ * `runCli` binds the sink once, before it calls a command: the command says
+ * *what* it emits and the front end decides *where* each kind of line goes.
+ * These tests dispatch a real probe command through the real dispatch path, so
+ * the binding is exercised where a Task-11 command would meet it.
+ */
+describe("runCli: a command cannot choose its stream", () => {
+  const PROBE_TABLE: Table<{ id: number }> = {
+    columns: [{ key: "id", header: "id", align: "right", value: (row) => String(row.id) }],
+    rows: [{ id: 1 }, { id: 2 }, { id: 3 }],
+  };
+
+  const probe: Command = {
+    name: "probe",
+    summary: "Emit a payload and two chatter lines",
+    async run(_ctx, _args, out) {
+      // The sink is the only writer a command can reach, and no channel takes a
+      // format, so the routing cannot be re-opened from inside a command.
+      for (const channel of [out.payload, out.note, out.verbose, out.error]) {
+        expect(channel.length).toBe(1);
+      }
+      out.payload(PROBE_TABLE);
+      out.note("probe: note\n");
+      out.verbose("probe: verbose\n");
+      return EXIT.OK;
+    },
+  };
+
+  test("with --json -v stdout parses as JSON and both lines are on stderr", async () => {
+    const io = capture();
+    const code = await runCli({ ...io.ctx, argv: ["--json", "-v", "probe"] }, [probe]);
+
+    expect(code).toBe(EXIT.OK);
+    expect(io.stdout.text()).toBe(renderJson(PROBE_TABLE));
+    expect(JSON.parse(io.stdout.text())).toHaveLength(3);
+    expect(io.stderr.text()).toBe("probe: note\nprobe: verbose\n");
+  });
+
+  test("without a machine format the note stays on stdout", async () => {
+    const io = capture();
+    const code = await runCli({ ...io.ctx, argv: ["-v", "probe"] }, [probe]);
+
+    expect(code).toBe(EXIT.OK);
+    expect(io.stdout.text()).toBe(renderTable(PROBE_TABLE) + "probe: note\nprobe: verbose\n");
+    expect(io.stderr.text()).toBe("");
+  });
+
+  test("under --json a command's error line still goes to stderr", async () => {
+    const io = capture();
+    expect(await runCli({ ...io.ctx, argv: ["--json", "list"] })).toBe(EXIT.ERROR);
+    expect(io.stdout.text()).toBe("");
+    expect(io.stderr.text()).toContain("not implemented");
+  });
+
+  test("a command's context has no raw writer (the type is the assertion)", () => {
+    const read = (ctx: CommandContext): unknown => {
+      // @ts-expect-error a command context deliberately has no `stdout`.
+      return ctx.stdout;
+    };
+    expect(read).toBeTypeOf("function");
   });
 });
 
