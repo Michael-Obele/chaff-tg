@@ -29,3 +29,21 @@ export { ChaffError, classify, EXIT } from "./errors";
 export type { Classified, ClassifyOptions, ErrorKind } from "./errors";
 export { abortError, Pacer, PacerCapError } from "./pacing";
 export type { PacerOptions } from "./pacing";
+
+//
+// Local state: where the session file lives, the modes it is born with, and the
+// config file the run's defaults come from. The session file is the whole
+// account, so the modes are set on creation and the credential is read from the
+// environment first (plan/safety.md, "The session file").
+//
+export { ConfigError, DEFAULT_CONFIG, loadConfig, resolveCredentials } from "./config";
+export type { Config, ConfigErrorCode, Credentials } from "./config";
+export {
+  ensureSecureDir,
+  ensureSession,
+  fileMode,
+  removeSession,
+  resolvePaths,
+  sessionExists,
+} from "./session";
+export type { Paths } from "./session";
