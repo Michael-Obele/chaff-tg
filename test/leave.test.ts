@@ -617,6 +617,194 @@ describe("resume", () => {
     expect(resumedLeft.error).toBeUndefined();
     journal.close();
   });
+
+  test("an unfinished run's stale pending seed does not hide a chat an earlier run already left", async () => {
+    const journal = openJournal();
+
+    // Run 0 leaves -1001 and finishes.
+    const run0 = await core.runLeave(
+      new FakeClient(),
+      planOf([chat(-1001, "Already Gone")]),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(run0.left).toBe(1);
+    expect(journal.listRuns()[0]!.finishedAt).toBe(FIXED_ISO);
+
+    // Run 1 plans a chat that floods, plus -1001. It breaks before reaching
+    // -1001, so that chat's *seed* stays pending and is newer than run 0's
+    // `left` -- a seed is not a verdict and must not un-settle the chat.
+    const flooding = new FakeClient({
+      failures: [{ chatId: -2001, error: fakeRpcError("FLOOD_WAIT_90") }],
+    });
+    const run1 = await core.runLeave(
+      flooding,
+      planOf([chat(-2001, "Fresh Find"), chat(-1001, "Already Gone")]),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(run1.left).toBe(0);
+    expect(run1.floodWaitSeconds).toBe(90);
+
+    // Run 2 continues run 1: -2001 is left, -1001 is already settled and must
+    // never be left a second time.
+    const client = new FakeClient();
+    const progress: Progress[] = [];
+    const run2 = await core.runLeave(
+      client,
+      planOf([chat(-2001, "Fresh Find"), chat(-1001, "Already Gone")]),
+      options(recordingSleep(), { journal }),
+      (p) => progress.push(p),
+    );
+
+    expect(client.attempts.map((a) => a.chatId)).toEqual([-2001]);
+    expect(client.left).toEqual([-2001]);
+    expect(transcript(progress)).toEqual(["left:-2001", "left:-1001"]);
+    expect(run2.left).toBe(2);
+    journal.close();
+  });
+
+  test("a run-local failure does not outrank a newer run's leave", async () => {
+    const journal = openJournal();
+
+    // Run 0 fails -1 (unrecognised -> stop) and never reaches -2.
+    const failing = new FakeClient({
+      failures: [{ chatId: -1, error: fakeRpcError("USER_NOT_PARTICIPANT") }],
+    });
+    const run0 = await core.runLeave(
+      failing,
+      planOf([chat(-1, "One"), chat(-2, "Two")]),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(run0.failed).toBe(1);
+
+    // Run 1 is narrower and leaves -1 for real.
+    const run1 = await core.runLeave(
+      new FakeClient(),
+      planOf([chat(-1, "One")]),
+      options(recordingSleep(), { journal }),
+      () => {},
+    );
+    expect(run1.left).toBe(1);
+
+    // Run 2 continues run 0 (same chats). -1 was left since, so it is settled
+    // -- reported left, not re-reported as the failure run 0 recorded.
+    const client = new FakeClient();
+    const progress: Progress[] = [];
+    const run2 = await core.runLeave(
+      client,
+      planOf([chat(-1, "One"), chat(-2, "Two")]),
+      options(recordingSleep(), { journal }),
+      (p) => progress.push(p),
+    );
+
+    expect(transcript(progress)).toEqual(["left:-1", "left:-2"]);
+    expect(run2.left).toBe(2);
+    expect(run2.failed).toBe(0);
+    expect(run2.failures).toEqual([]);
+    expect(client.attempts.map((a) => a.chatId)).toEqual([-2]);
+    journal.close();
+  });
+});
+
+describe("sessions", () => {
+  test("another session's leave does not settle this session's chat", async () => {
+    const journal = openJournal();
+    const plan = planOf([chat(-1001, "Shared Chat")]);
+
+    const a = await core.runLeave(
+      new FakeClient(),
+      plan,
+      options(recordingSleep(), { journal, session: "account-a" }),
+      () => {},
+    );
+    expect(a.left).toBe(1);
+    expect(journal.listRuns()[0]!.session).toBe("account-a");
+
+    // Telegram chat ids are global, so the same id under another account is a
+    // chat that account has not left: it must be attempted, not folded away.
+    const client = new FakeClient();
+    const progress: Progress[] = [];
+    const b = await core.runLeave(
+      client,
+      plan,
+      options(recordingSleep(), { journal, session: "account-b" }),
+      (p) => progress.push(p),
+    );
+    expect(client.attempts.map((x) => x.chatId)).toEqual([-1001]);
+    expect(b.left).toBe(1);
+    expect(transcript(progress)).toEqual(["left:-1001"]);
+    expect(journal.listRuns().map((run) => run.session)).toEqual(["account-a", "account-b"]);
+    journal.close();
+  });
+
+  test("only the session that opened an unfinished run may continue it", async () => {
+    const journal = openJournal();
+    const flooding = new FakeClient({
+      failures: [{ chatId: -1002, error: fakeRpcError("FLOOD_WAIT_90") }],
+    });
+    const a = await core.runLeave(
+      flooding,
+      planOf(),
+      options(recordingSleep(), { journal, session: "account-a" }),
+      () => {},
+    );
+    expect(a.floodWaitSeconds).toBe(90);
+
+    // Account B must open its own run rather than write into account A's.
+    const client = new FakeClient();
+    const b = await core.runLeave(
+      client,
+      planOf(),
+      options(recordingSleep(), { journal, session: "account-b" }),
+      () => {},
+    );
+    expect(client.attempts.map((x) => x.chatId)).toEqual([-1001, -1002, -1003, -1004, -1005]);
+    expect(b.left).toBe(5);
+    expect(journal.listRuns().map((run) => run.session)).toEqual(["account-a", "account-b"]);
+    journal.close();
+  });
+});
+
+describe("a plan with a duplicate chat id", () => {
+  test("is deduped before anything happens, so a chat is never left twice in one run", async () => {
+    const journal = openJournal();
+    const duplicated = planOf([chat(-1001, "Twice"), chat(-1001, "Twice")]);
+
+    const client = new FakeClient();
+    const progress: Progress[] = [];
+    const result = await core.runLeave(
+      client,
+      duplicated,
+      options(recordingSleep(), { journal }),
+      (p) => progress.push(p),
+    );
+
+    expect(client.attempts.map((a) => a.chatId)).toEqual([-1001]);
+    expect(result.planned).toBe(1);
+    expect(result.left).toBe(1);
+    expect(transcript(progress)).toEqual(["left:-1001"]);
+
+    const run = journal.listRuns()[0]!;
+    expect(run.planned).toBe(1);
+    expect(run.left).toBe(1);
+    expect(journalTranscript(journal, run.id)).toEqual(["left:-1001"]);
+    expect(run.finishedAt).toBe(FIXED_ISO);
+
+    // The dry run counts the same distinct chats, so `planned` is the number
+    // of chats the run would touch, not the number of rows the manifest holds.
+    const dryProgress: Progress[] = [];
+    const dry = await core.runLeave(
+      new FakeClient(),
+      duplicated,
+      options(recordingSleep(), { journal, yes: false }),
+      (p) => dryProgress.push(p),
+    );
+    expect(dry.planned).toBe(1);
+    expect(transcript(dryProgress)).toEqual(["pending:-1001"]);
+    journal.close();
+  });
 });
 
 describe("caps", () => {

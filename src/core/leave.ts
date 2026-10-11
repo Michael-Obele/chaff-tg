@@ -21,10 +21,17 @@
  *   is left alone -- absorbing a foreign plan would append a row the run never
  *   planned and strand one of its own chats, and leaving a chat twice is the
  *   one thing the journal exists to prevent.
- * - **Never leave a chat twice, in any run.** A chat the journal already has as
- *   `left` (or `skipped`) is settled, whether that verdict comes from the run
- *   being continued or from a run that finished long ago, so a plan rerun
- *   after a completed run attempts nothing.
+ * - **Never leave a chat twice, in any run.** A chat the journal has as `left`
+ *   or `skipped` is settled, wherever that verdict came from, so a plan rerun
+ *   after a completed run attempts nothing. The rule is monotone: a `pending`
+ *   seed and a `failed` row never un-settle a chat, because a seed is not a
+ *   verdict and a failure is one run's opinion of one attempt. It is scoped to
+ *   the run's session, because "this account left it" is the claim the journal
+ *   can support -- one journal serves every session in the data directory.
+ * - **One chat, one leave, one run.** The plan is deduplicated by chat id
+ *   before anything is seeded, attempted or counted, so a manifest holding the
+ *   same id twice cannot leave that chat twice in one run or make the reported
+ *   `planned` disagree with the rows the journal holds.
  * - **A stop is not a failure.** A flood wait, a cap and an abort all leave the
  *   chats they did not reach `pending`, and never claim a chat was left when it
  *   was not. A flood and a cap are not retried, and the run is only marked
@@ -39,7 +46,13 @@
  * because the only outputs are the journal writes and the callback.
  */
 import { classify } from "./errors";
-import { type ActionRow, type ActionState, type Journal } from "./journal";
+import {
+  DEFAULT_SESSION,
+  type ActionRow,
+  type ActionState,
+  type Journal,
+  type SettledRow,
+} from "./journal";
 import { defaultSleep, Pacer, type PacerOptions, PacerCapError } from "./pacing";
 import type { TelegramClientLike } from "./telegram";
 import type { Plan, PlanChat } from "./types";
@@ -117,6 +130,16 @@ export interface LeaveOptions {
   force: boolean;
   /** Where to record the run; `null` runs without a journal. */
   journal: Journal | null;
+  /**
+   * The session (the account) these leaves belong to.
+   *
+   * One journal serves every session in the data directory and Telegram chat
+   * ids are global, so a chat account A left says nothing about account B. The
+   * cross-run settled fold is scoped to this name, and so is the run this
+   * invocation may continue; `DEFAULT_SESSION` is what a caller with a single
+   * account gets by leaving it unset.
+   */
+  session?: string;
   /** Ctrl+C: the run stops at the next safe point. */
   signal?: AbortSignal;
   /** Injected sleep, reused for pacing, flood waits and network backoff. */
@@ -156,7 +179,7 @@ export async function runLeave(
   opts: LeaveOptions,
   onProgress: (p: Progress) => void,
 ): Promise<RunResult> {
-  const chats = plan.chats;
+  const chats = distinctById(plan.chats);
   const total = chats.length;
 
   // A dry run is a rehearsal: it touches no chat, writes no run row and takes
@@ -177,21 +200,24 @@ export async function runLeave(
   if (isAborted(opts.signal)) return { ...nothingHappened(total), aborted: true };
 
   const journal = opts.journal;
+  const session = opts.session ?? DEFAULT_SESSION;
   const ids = chats.map((chat) => chat.id);
 
-  // Every run's newest verdict for these chats, read *before* this invocation
+  // Every run's settled verdict for these chats, read *before* this invocation
   // opens a run of its own: the `pending` seeds a fresh run writes would
-  // otherwise be the newest thing the journal says about those chats and would
-  // shadow the run that already left them.
-  const prior = journal === null ? [] : journal.latestStates(ids);
+  // otherwise be newer rows about those chats. The fold ignores them anyway
+  // (`settledStates` reads only `left`/`skipped`), but reading first keeps the
+  // fold and the seeding from being able to disagree at all.
+  const prior: SettledRow[] = journal === null ? [] : journal.settledStates(session, ids);
 
-  // Which run this invocation writes to. A run may only be continued when its
-  // planned chats are *exactly* this plan's chats -- the same set, order aside.
-  // Continuing one that planned something else would append a row it never
-  // planned (breaking `runs.planned`) and leave one of its own chats `pending`
-  // forever, so the run could never finish. A plan that does not match gets its
-  // own run, and the unfinished one is left exactly as it was.
-  const candidate = journal === null ? null : journal.latestUnfinished();
+  // Which run this invocation writes to. A run may only be continued when it
+  // belongs to this session and its planned chats are *exactly* this plan's
+  // chats -- the same set, order aside. Continuing one that planned something
+  // else would append a row it never planned (breaking `runs.planned`) and
+  // leave one of its own chats `pending` forever, so the run could never
+  // finish; continuing another session's run would file these leaves under the
+  // wrong account.
+  const candidate = journal === null ? null : journal.latestUnfinished(session);
   const resumed =
     journal !== null && candidate !== null && sameChats(chats, journal.actions(candidate.id))
       ? candidate
@@ -199,7 +225,7 @@ export async function runLeave(
   const runId: number | null =
     resumed !== null
       ? resumed.id
-      : (journal?.startRun("leave", JSON.stringify(plan.filters), chats) ?? null);
+      : (journal?.startRun("leave", JSON.stringify(plan.filters), chats, session) ?? null);
 
   // The run's own ledger: one row per planned chat. `owned` is the authority for
   // every write below, so a mark for a chat this run did not plan can never
@@ -210,31 +236,37 @@ export async function runLeave(
 
   // What is already settled, and so must not be attempted again.
   //
-  // Two sources, because "never leave the same chat twice" spans runs. The run
-  // being continued contributes its own settled rows, so a failure it recorded
-  // is *re-reported* with the message it stored instead of retried. Then every
-  // run's newest verdict for these chats is folded in for `left`/`skipped`: a
-  // rerun of a plan a finished run already completed must attempt nothing.
+  // Two sources, because "never leave the same chat twice" spans runs. First
+  // the monotone fold: any `left`/`skipped` row in this session settles the
+  // chat, whatever any later run's `pending` seed or `failed` row says. Then
+  // the run being continued contributes its own unsettled verdicts -- a failure
+  // it recorded is *re-reported* with the message it stored instead of retried
+  // -- but only for chats the fold did not settle, so a newer `left` always
+  // wins over an older local `failed`.
+  //
+  // `recorded` says whether the run this invocation writes to already holds
+  // that same verdict. When it does not, the verdict is carried forward below,
+  // because a `pending` row left behind would keep the run unfinishable.
   const settled = new Map<
     number,
     { state: SettledState; error: string | null; recorded: boolean }
   >();
   if (journal !== null) {
-    for (const row of runRows) {
-      if (row.state === "pending") continue;
+    const inRun = new Map(runRows.map((row) => [row.id, row.state]));
+    for (const row of prior) {
       settled.set(row.id, {
         state: row.state,
         error: settledNote(row.state, row.error),
-        recorded: true,
+        recorded: inRun.get(row.id) === row.state,
       });
     }
-    for (const row of prior) {
-      if (row.state !== "left" && row.state !== "skipped") continue;
-      if (settled.get(row.id)?.recorded === true) continue;
+    for (const row of runRows) {
+      if (row.state === "pending") continue;
+      if (settled.has(row.id)) continue;
       settled.set(row.id, {
         state: row.state,
         error: settledNote(row.state, row.error),
-        recorded: false,
+        recorded: inRun.get(row.id) === row.state,
       });
     }
   }
@@ -389,6 +421,27 @@ export async function runLeave(
   }
 
   return { planned: total, ...counts, aborted, capped, floodWaitSeconds, failures };
+}
+
+/**
+ * The plan's chats, with any repeated id dropped; the first occurrence wins.
+ *
+ * A plan is meant to hold one row per chat, but `--from` replays a
+ * hand-editable manifest and `--select` takes ids straight off the command
+ * line, so a repeated id is one keystroke away. Leaving a chat twice in one run
+ * is the invariant this module exists to keep, so the seam enforces it itself
+ * rather than trusting the plan's producer: the seeded rows, `runs.planned` and
+ * every counter then agree on the same distinct set.
+ */
+function distinctById(chats: PlanChat[]): PlanChat[] {
+  const seen = new Set<number>();
+  const distinct: PlanChat[] = [];
+  for (const chat of chats) {
+    if (seen.has(chat.id)) continue;
+    seen.add(chat.id);
+    distinct.push(chat);
+  }
+  return distinct;
 }
 
 /**

@@ -11,11 +11,16 @@
  *   `pending()` returns every untouched chat exactly once, with the ones
  *   already marked `left`/`failed`/`skipped` absent.
  * - `latestUnfinished()` is the newest run that is unfinished *and* still has
- *   a `pending` row: a run whose chats were all acted on is not offered.
+ *   a `pending` row: a run whose chats were all acted on is not offered, and
+ *   only a run of the *same* session is offered at all.
+ * - `settledStates()` is the monotone cross-run rule: a chat is settled by
+ *   *any* `left`/`skipped` row in its session, and a `pending` seed or a
+ *   `failed` row never un-settles it.
  * - Marking the same `(run_id, chat_id)` twice updates the single row; it
  *   never inserts a second one, and the run's counters do not double count.
  * - `finishRun` sets `finished_at`; an unfinished run has it `NULL`, and
  *   `latestUnfinished()` ignores finished runs.
+ * - `open` upgrades a journal written before the `session` column existed.
  * - The file is created mode 600 and its parent directory mode 700.
  * - Timestamps come from the injected clock, so every assertion here is
  *   deterministic and no test reads the wall clock.
@@ -118,6 +123,7 @@ describe("startRun and listRuns", () => {
     expect(j.listRuns()).toEqual([
       {
         id: 1,
+        session: "default",
         startedAt: FIXED_ISO,
         finishedAt: null,
         mode: "leave",
@@ -143,6 +149,7 @@ describe("startRun and listRuns", () => {
     expect(runs[0]!.mode).toBe("leave");
     expect(runs[1]!).toEqual({
       id: 2,
+      session: "default",
       startedAt: FIXED_ISO,
       finishedAt: null,
       mode: "dry-run",
@@ -370,31 +377,111 @@ describe("finishRun and latestUnfinished", () => {
   });
 });
 
-describe("latestStates across runs", () => {
-  test("reports each chat's state from its newest run, whatever that run's status", () => {
+describe("settledStates across runs", () => {
+  test("a chat is settled by any left or skipped row, never by a pending or failed one", () => {
     const j = Journal.open(tempJournalPath(), fixedClock);
     const first = startedRun(j, 3);
     j.mark(first, CHATS[0]!, "left");
     j.mark(first, CHATS[1]!, "failed", "boom");
     j.finishRun(first);
 
-    // A newer run over one of the same chats: its verdict is the latest one,
-    // even though the older run is the one that carries the other states.
-    const second = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 1));
-    j.mark(second, CHATS[0]!, "left");
-    j.finishRun(second);
+    // A newer unfinished run seeds every chat `pending` again. A seed is not a
+    // verdict, so it must not un-settle what the first run recorded.
+    const second = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 3));
 
-    // One row per chat, in the order the ids were asked for. `pending` is a
-    // state like any other here; only the *newest* run is consulted per chat.
-    expect(j.latestStates(CHATS.slice(0, 3).map((c) => c.id))).toEqual([
+    expect(
+      j.settledStates(
+        "default",
+        CHATS.slice(0, 3).map((c) => c.id),
+      ),
+    ).toEqual([{ id: CHATS[0]!.id, title: CHATS[0]!.title, state: "left", error: null }]);
+
+    // `skipped` settles too, and keeps the message that explains it.
+    j.mark(second, CHATS[1]!, "skipped", "CHANNEL_PRIVATE");
+    expect(
+      j.settledStates(
+        "default",
+        CHATS.slice(0, 3).map((c) => c.id),
+      ),
+    ).toEqual([
       { id: CHATS[0]!.id, title: CHATS[0]!.title, state: "left", error: null },
-      { id: CHATS[1]!.id, title: CHATS[1]!.title, state: "failed", error: "boom" },
-      { id: CHATS[2]!.id, title: CHATS[2]!.title, state: "pending", error: null },
+      { id: CHATS[1]!.id, title: CHATS[1]!.title, state: "skipped", error: "CHANNEL_PRIVATE" },
     ]);
 
-    // A chat with no recorded row anywhere is absent, not invented.
-    expect(j.latestStates([-9999])).toEqual([]);
-    expect(j.latestStates([])).toEqual([]);
+    // A chat with only pending/failed rows anywhere is not settled at all, and
+    // ids the journal has never seen are absent rather than invented.
+    expect(j.settledStates("default", [CHATS[2]!.id])).toEqual([]);
+    expect(j.settledStates("default", [-9999])).toEqual([]);
+    expect(j.settledStates("default", [])).toEqual([]);
+    j.close();
+  });
+
+  test("scopes the fold to the session a run belongs to", () => {
+    const j = Journal.open(tempJournalPath(), fixedClock);
+    const a = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 1), "account-a");
+    j.mark(a, CHATS[0]!, "left");
+    j.finishRun(a);
+
+    expect(j.listRuns()[0]!.session).toBe("account-a");
+    expect(j.settledStates("account-a", [CHATS[0]!.id])).toEqual([
+      { id: CHATS[0]!.id, title: CHATS[0]!.title, state: "left", error: null },
+    ]);
+    // Another account's leave says nothing about this one, and a run with no
+    // session named is the `default` session -- not every session.
+    expect(j.settledStates("account-b", [CHATS[0]!.id])).toEqual([]);
+    expect(j.settledStates("default", [CHATS[0]!.id])).toEqual([]);
+    j.close();
+  });
+});
+
+describe("opening a journal written before the session column", () => {
+  test("adds the column, backfills `default`, and keeps the rows it already held", () => {
+    const path = tempJournalPath();
+    // The pre-change schema verbatim: `runs` has no `session` column.
+    const old = new Database(path, { create: true });
+    old.exec(`
+      create table runs (
+        id integer primary key,
+        started_at text not null,
+        finished_at text,
+        mode text not null,
+        filters text not null,
+        planned integer not null,
+        left integer not null default 0,
+        failed integer not null default 0
+      );
+      create table actions (
+        run_id integer not null,
+        chat_id integer not null,
+        title text not null,
+        state text not null,
+        error text,
+        at text,
+        primary key (run_id, chat_id)
+      );
+    `);
+    old
+      .query("insert into runs values (1, ?, null, 'leave', ?, 2, 1, 0)")
+      .run(FIXED_ISO, FILTERS_JSON);
+    old
+      .query("insert into actions values (1, ?, ?, 'left', null, ?)")
+      .run(CHATS[0]!.id, CHATS[0]!.title, FIXED_ISO);
+    old
+      .query("insert into actions values (1, ?, ?, 'pending', null, ?)")
+      .run(CHATS[1]!.id, CHATS[1]!.title, FIXED_ISO);
+    old.close();
+
+    const j = Journal.open(path, fixedClock);
+    // The historical run reads back as the `default` session and still settles
+    // its chat there, and the upgraded column can be written like any other.
+    expect(j.listRuns()[0]!.session).toBe("default");
+    expect(j.latestUnfinished()!.id).toBe(1);
+    expect(j.settledStates("default", [CHATS[0]!.id])).toEqual([
+      { id: CHATS[0]!.id, title: CHATS[0]!.title, state: "left", error: null },
+    ]);
+    const fresh = j.startRun("leave", FILTERS_JSON, CHATS.slice(0, 1), "account-b");
+    expect(j.listRuns()[1]!.session).toBe("account-b");
+    expect(j.actions(fresh)).toHaveLength(1);
     j.close();
   });
 });

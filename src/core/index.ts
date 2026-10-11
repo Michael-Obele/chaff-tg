@@ -15,8 +15,16 @@ export const VERSION = "0.1.0";
 // from their own modules; this barrel grows as each seam lands.
 //
 export { applyExclude, buildPlan, DEFAULT_DELAY_MS, estimateSeconds } from "./plan";
-export { Journal } from "./journal";
-export type { ActionRow, ActionState, PendingChat, PlannedChat, RunMode, RunRow } from "./journal";
+export { DEFAULT_SESSION, Journal } from "./journal";
+export type {
+  ActionRow,
+  ActionState,
+  PendingChat,
+  PlannedChat,
+  RunMode,
+  RunRow,
+  SettledRow,
+} from "./journal";
 export type { Account, Plan, PlanChat } from "./types";
 
 //
