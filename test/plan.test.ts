@@ -147,7 +147,7 @@ describe("buildPlan", () => {
     expect(estimateSeconds(0, 1200)).toBe(0);
     expect(estimateSeconds(3, 1200)).toBe(4); // 3.6 s rounds up
     expect(estimateSeconds(5, 400)).toBe(2);
-    expect(estimateSeconds(37, 1400)).toBe(52); // the plan/cli.md example
+    expect(estimateSeconds(37, 1200)).toBe(44); // the plan/cli.md example
   });
 
   test("stamps createdAt from the injected clock and pins the version", () => {

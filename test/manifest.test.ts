@@ -80,7 +80,7 @@ const EXAMPLE: Plan = {
   createdAt: "2026-10-11T13:04:00Z",
   account: { id: 1234567, username: "example" },
   filters: { ...UNSET_FILTERS, types: ["channel", "supergroup"], muted: true, inactiveDays: 365 },
-  summary: { matched: 37, estimatedSeconds: 52 },
+  summary: { matched: 37, estimatedSeconds: 44 },
   chats: [CHAT],
 };
 
