@@ -23,3 +23,11 @@ Working agreement for anyone (human or agent) working on `chaff-tg`.
    `src/core/telegram.ts`. Everything else talks to our own types.
 4. **Destructive actions default to dry-run.** Anything that leaves or clears
    chats requires explicit confirmation; no flag combination may bypass it.
+5. **Bun APIs first, `node:fs` for what Bun leaves to it.** Reach for `Bun.file`,
+   `Bun.write`, `Bun.spawn`, `Bun.Glob` and `bun:sqlite` before their `node:`
+   equivalents. Three things stay on `node:fs` because Bun has no equivalent and
+   its own file I/O docs say to use `node:fs` for them: directories (`mkdir`,
+   `readdir`), file modes (`open(path, "a", 0o600)` for the 600 session and
+   config files), and synchronous reads (`loadConfig` is sync by design).
+   `Bun.write` creates a file `664` and takes no mode, and `BunFile.exists()` is
+   false for a directory, so neither can replace those.

@@ -9,12 +9,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { EXIT } from "../src/core/errors";
 import { runCli, type CliContext } from "../src/cli/index";
 
 /** The Task 2 fixtures, which `CHAFF_FIXTURE` points the fake client at. */
-const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
+const FIXTURES = join(import.meta.dir, "fixtures");
 
 /** A hash-shaped string, distinct enough that a leak cannot hide in a match. */
 const API_HASH = "0123456789abcdef0123456789abcdef";

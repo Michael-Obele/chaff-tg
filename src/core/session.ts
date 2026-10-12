@@ -39,7 +39,7 @@
  * already does exactly this for the journal database.
  */
 import { statSync } from "node:fs";
-import { mkdir, open, stat, unlink } from "node:fs/promises";
+import { mkdir, open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -187,7 +187,9 @@ export async function sessionExists(p: Paths, name: string): Promise<boolean> {
 /** Delete `path`, saying whether it was there. Only a missing file is forgiven. */
 async function remove(path: string): Promise<boolean> {
   try {
-    await unlink(path);
+    // `Bun.file().delete()` throws the same ENOENT as `unlink`, so the single
+    // forgiven failure is unchanged.
+    await Bun.file(path).delete();
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;

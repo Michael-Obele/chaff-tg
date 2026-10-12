@@ -19,7 +19,9 @@
  * release build is the slow, metered path. `--target` is how the smoke test and
  * a local spot-check stay cheap.
  */
-import { mkdirSync, statSync } from "node:fs";
+// `node:fs` for `mkdirSync` on purpose: Bun has no directory API of its own, and
+// its file I/O docs point at `node:fs` for mkdir and readdir.
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** The repo root, so the script runs from anywhere. */
@@ -177,7 +179,9 @@ async function buildTarget(
   const output = result.outputs[0];
   if (output === undefined) throw new Error(`build for ${target} produced no artifact`);
 
-  return { target, path: output.path, bytes: statSync(output.path).size };
+  // `Bun.file().size` is a synchronous property, so no extra call is needed to
+  // report the artefact's size.
+  return { target, path: output.path, bytes: Bun.file(output.path).size };
 }
 
 async function main(): Promise<void> {

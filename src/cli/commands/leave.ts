@@ -38,7 +38,6 @@
  * (`--json`, `--csv`, `--md`) refuses the checklist rather than interleaving a
  * prompt with a document, and the run stops before anything is touched.
  */
-import { readFileSync } from "node:fs";
 import { EXIT } from "../../core/errors";
 import { Journal } from "../../core/journal";
 import { runLeave, type LeaveClient, type Progress, type RunResult } from "../../core/leave";
@@ -159,7 +158,7 @@ export const leaveCommand: Command = {
       } else {
         let text: string;
         try {
-          text = readFileSync(selection.from, "utf8");
+          text = await Bun.file(selection.from).text();
         } catch (error) {
           throw new Error(`cannot read manifest ${selection.from}: ${messageOf(error)}`);
         }

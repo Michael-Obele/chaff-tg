@@ -19,7 +19,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { emptyFilters } from "../src/cli/args";
 import { runChecklist, runConfirm, type ChecklistItem } from "../src/cli/checklist";
 import { runCli, type CliContext } from "../src/cli/index";
@@ -30,7 +29,7 @@ import { buildPlan } from "../src/core/plan";
 import { loadFixtures } from "./fake-client";
 
 /** The Task 2 fixtures, which `CHAFF_FIXTURE` points the fake client at. */
-const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
+const FIXTURES = join(import.meta.dir, "fixtures");
 
 /** The clock every plan in this file is stamped with. */
 const NOW = new Date("2026-10-12T00:00:00Z");

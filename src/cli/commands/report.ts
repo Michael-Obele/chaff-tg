@@ -43,7 +43,6 @@
  * records chat titles, and titles in a commit are the kind of thing a user
  * only thinks about afterwards.
  */
-import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { EXIT } from "../../core/errors";
 import { ManifestError, parseManifest, serializeManifest } from "../../core/manifest";
@@ -87,7 +86,7 @@ export const reportCommand: Command = {
     } else {
       let text: string;
       try {
-        text = readFileSync(from, "utf8");
+        text = await Bun.file(from).text();
       } catch (error) {
         throw new Error(`cannot read manifest ${from}: ${messageOf(error)}`);
       }
@@ -137,7 +136,7 @@ export const reportCommand: Command = {
     // table format those are the table, and this command's file is the
     // manifest. One overwrite, last write wins, stdout untouched.
     if (out !== null && outputFormat(ctx.args.flags) === "table") {
-      writeFileSync(out, manifest);
+      await Bun.write(out, manifest);
     }
 
     return EXIT.OK;
