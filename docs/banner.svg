@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="chaff-tg — leave the chaff behind">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0f14" />
+      <stop offset="100%" stop-color="#131c26" />
+    </linearGradient>
+    <linearGradient id="grain" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8c66a" />
+      <stop offset="100%" stop-color="#b98f36" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg)" />
+  <rect x="0" y="0" width="1200" height="4" fill="url(#grain)" />
+
+  <!-- Winnowing: kept grain on the left, chaff falling away on the right. -->
+  <g fill="url(#grain)">
+    <ellipse cx="88" cy="150" rx="9" ry="26" />
+    <ellipse cx="112" cy="150" rx="9" ry="26" />
+    <ellipse cx="136" cy="150" rx="9" ry="26" />
+    <ellipse cx="160" cy="150" rx="9" ry="26" />
+  </g>
+  <g fill="#4a5b6b">
+    <ellipse cx="196" cy="186" rx="7" ry="19" transform="rotate(24 196 186)" />
+    <ellipse cx="222" cy="214" rx="7" ry="19" transform="rotate(40 222 214)" />
+    <ellipse cx="250" cy="238" rx="7" ry="19" transform="rotate(58 250 238)" />
+    <ellipse cx="282" cy="256" rx="7" ry="19" transform="rotate(74 282 256)" />
+  </g>
+
+  <text x="340" y="146" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="76" font-weight="700" fill="#f2f6fa" letter-spacing="1">chaff-tg</text>
+  <text x="342" y="192" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="22" fill="#8fa3b6" letter-spacing="0.5">leave the chaff behind</text>
+  <text x="342" y="232" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="16" fill="#5d7085">bulk-leave unwanted Telegram groups and channels — locally</text>
+</svg>
