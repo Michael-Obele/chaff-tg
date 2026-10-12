@@ -3,16 +3,23 @@
  * Mirrors test/commands-list.test.ts and test/commands-leave.test.ts harness.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { EXIT } from "../src/core/errors";
 import { Journal } from "../src/core/journal";
 import { runCli, type CliContext } from "../src/cli/index";
 
-const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
+const FIXTURES = join(import.meta.dir, "fixtures");
 const API_HASH = "0123456789abcdef0123456789abcdef";
 
 const roots: string[] = [];
@@ -136,6 +143,44 @@ describe("chaff login (fake)", () => {
     const who = await run(["whoami", "--json"], env);
     expect(who.stdout.text()).not.toContain(API_HASH);
     expect(who.stderr.text()).not.toContain(API_HASH);
+  });
+});
+
+describe("chaff login records the credentials it resolved", () => {
+  test("writes them into the config file, and never prints the hash", async () => {
+    const { root, env } = sandbox({ CHAFF_API_ID: "123456", CHAFF_API_HASH: API_HASH });
+
+    // A data directory that cannot be created (`/dev/null` is not a directory),
+    // which stops the run before it can reach the network, so this stays an
+    // offline test. The credentials are recorded first, which is the behaviour
+    // under test: a login that cannot finish still saves the retyping.
+    const configDir = join(root, "config", "chaff-tg");
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ sessionDir: "/dev/null/nowhere" }));
+
+    const login = await run(["login"], env);
+
+    expect(login.code).toBe(EXIT.ERROR);
+    expect(login.stdout.text()).not.toContain(API_HASH);
+    expect(login.stderr.text()).not.toContain(API_HASH);
+
+    // Recorded, and the keys that were already there survived the write.
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+      sessionDir: "/dev/null/nowhere",
+      apiId: 123456,
+      apiHash: API_HASH,
+    });
+
+    // The point of writing the file: a later command in a shell with neither
+    // variable set resolves both halves from it, with no .env in sight.
+    const later = await run(["doctor"], {
+      HOME: root,
+      XDG_CONFIG_HOME: join(root, "config"),
+      XDG_DATA_HOME: join(root, "data"),
+    });
+    expect(later.stdout.text()).toMatch(/config api id\s+present/);
+    expect(later.stdout.text()).toMatch(/config api hash\s+present/);
   });
 });
 

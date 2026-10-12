@@ -36,8 +36,12 @@
  * worse than refusing.
  *
  * Core rules hold: no stdout, no network, no clock.
+ *
+ * This module is also the only writer of the file, through
+ * `writeConfigCredentials`: the credentials a login collected are recorded there
+ * so the next command finds them, and nothing else ever touches the file.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_DELAY_MS } from "./plan";
@@ -344,4 +348,37 @@ export function resolveCredentials(
 
   if (apiId === null || apiHash === null) return null;
   return { apiId, apiHash };
+}
+
+/**
+ * Record the credentials a login collected, so the next command finds them.
+ *
+ * `chaff login` is the only writer. The credentials arrive from a prompt, and a
+ * later `chaff list` run from another directory has nowhere else to read them
+ * from: the environment was set in the shell that ran the login and is not there
+ * anymore. The api hash is a secret, so the file is created mode 600 inside the
+ * 700 config directory (the caller creates that directory), the same rule as the
+ * session file. An existing file keeps the mode it already has, on purpose.
+ *
+ * Keys already in the file are kept: a user who hand-wrote `session` or
+ * `maxLeave` should not lose them to a login. A file that cannot be read or
+ * parsed is replaced, because the next command would refuse it anyway and
+ * deleting it by hand is the only other way out of that state.
+ */
+export function writeConfigCredentials(
+  configPath: string,
+  credentials: { apiId: number; apiHash: string },
+): void {
+  const merged: Record<string, unknown> = {};
+  try {
+    const existing: unknown = JSON.parse(readFileSync(configPath, "utf8"));
+    if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+      Object.assign(merged, existing);
+    }
+  } catch {
+    // Missing, unreadable, or not JSON: there is nothing to keep.
+  }
+  merged.apiId = credentials.apiId;
+  merged.apiHash = credentials.apiHash;
+  writeFileSync(configPath, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
 }

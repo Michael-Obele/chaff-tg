@@ -15,12 +15,18 @@
  * - credentials come from the environment first, each half independently, and
  *   nothing resolves unless both halves do.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Config } from "../src/core/config";
-import { ConfigError, DEFAULT_CONFIG, loadConfig, resolveCredentials } from "../src/core/config";
+import {
+  ConfigError,
+  DEFAULT_CONFIG,
+  loadConfig,
+  resolveCredentials,
+  writeConfigCredentials,
+} from "../src/core/config";
 import { DEFAULT_DELAY_MS } from "../src/core/plan";
 
 /** A value with the shape of a real api hash, used to prove it never leaks. */
@@ -41,6 +47,60 @@ let configPath: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "chaff-config-"));
   configPath = join(dir, "config.json");
+});
+
+describe("writeConfigCredentials", () => {
+  test("creates the file mode 600, and what it wrote loads back", async () => {
+    writeConfigCredentials(configPath, { apiId: 123456, apiHash: HASH });
+
+    expect((await stat(configPath)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      apiId: 123456,
+      apiHash: HASH,
+    });
+
+    // The point of writing it is that the next command reads it back.
+    const loaded = loadConfig(configPath);
+    expect(loaded.apiId).toBe(123456);
+    expect(loaded.apiHash).toBe(HASH);
+    expect(loaded.session).toBe(DEFAULT_CONFIG.session);
+  });
+
+  test("keeps the keys a hand-written file already holds", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({ session: "work", maxLeave: 7, delayMs: 500, sessionDir: "~/chaff" }),
+    );
+
+    writeConfigCredentials(configPath, { apiId: 1, apiHash: HASH });
+
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      session: "work",
+      maxLeave: 7,
+      delayMs: 500,
+      sessionDir: "~/chaff",
+      apiId: 1,
+      apiHash: HASH,
+    });
+  });
+
+  test("replaces a file that cannot be parsed", async () => {
+    await writeFile(configPath, "{ not json");
+
+    writeConfigCredentials(configPath, { apiId: 2, apiHash: HASH });
+
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ apiId: 2, apiHash: HASH });
+  });
+
+  test("the second login replaces the first one's credentials", async () => {
+    writeConfigCredentials(configPath, { apiId: 1, apiHash: HASH });
+    writeConfigCredentials(configPath, { apiId: 9, apiHash: FILE_HASH });
+
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      apiId: 9,
+      apiHash: FILE_HASH,
+    });
+  });
 });
 
 afterEach(async () => {

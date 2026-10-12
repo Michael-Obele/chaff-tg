@@ -1,11 +1,17 @@
 /**
  * `chaff login`: prompts for api id, api hash, phone, then the code; stores
  * the session with mode 600, directory 700; `--json` prints the session path
- * and the account. Under `CHAFF_FAKE=1` it writes a marker file instead of
- * calling mtcute, so CI can exercise the flow offline.
+ * and the account. It also records what it resolved in
+ * `~/.config/chaff-tg/config.json` (mode 600 inside the 700 config directory),
+ * from the prompt or from the environment: a `.env` is only found in the
+ * directory a command runs in, and the installed binary is meant to run
+ * anywhere. Under `CHAFF_FAKE=1` it writes a marker file instead of calling
+ * mtcute, so CI can exercise the flow offline.
  */
 import { open } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
+import { writeConfigCredentials } from "../../core/config";
 import { EXIT } from "../../core/errors";
 import { ensureSecureDir } from "../../core/session";
 import { fakeRequested, resolveLocalState } from "../client";
@@ -73,6 +79,13 @@ export const loginCommand: Command = {
       ctx.out.error("invalid api hash\n");
       return EXIT.USAGE;
     }
+
+    // Record the credentials this login resolved, either way, so later commands
+    // work from any directory. Written before connecting, so a login that fails
+    // to reach Telegram still saves the retyping. The environment still wins at
+    // read time, so this can never override what the user set on purpose.
+    await ensureSecureDir(dirname(paths.configPath));
+    writeConfigCredentials(paths.configPath, { apiId, apiHash });
 
     await ensureSecureDir(paths.dataDir);
     const handle = await open(sessionPath, "a", 0o600);
