@@ -123,7 +123,7 @@ describe("chaff list", () => {
     expect(stderr.text()).toBe("");
     // The count is chatter; the table follows it. Both are on stdout, which is
     // the documented arrangement with no machine format.
-    expect(stdout.text()).toContain("Found 17 chats");
+    expect(stdout.text()).toContain("Found 18 chats");
     const header =
       stdout
         .text()

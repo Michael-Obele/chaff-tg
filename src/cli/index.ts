@@ -33,6 +33,7 @@
 import { ChaffError, EXIT } from "../core/errors";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
+import { checkCommand } from "./commands/check";
 import { doctorCommand } from "./commands/doctor";
 import { journalCommand } from "./commands/journal";
 import { leaveCommand } from "./commands/leave";
@@ -140,6 +141,7 @@ export const COMMANDS: readonly Command[] = [
   loginCommand,
   whoamiCommand,
   listCommand,
+  checkCommand,
   reportCommand,
   leaveCommand,
   journalCommand,

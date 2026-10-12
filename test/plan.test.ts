@@ -56,6 +56,8 @@ function filters(overrides: Partial<Filters> = {}): Filters {
     members: null,
     scam: false,
     fake: false,
+    banned: false,
+    unavailable: false,
     unread: null,
     pinned: null,
     include: [],

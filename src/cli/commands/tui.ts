@@ -14,7 +14,7 @@ import type { Command } from "../index";
 
 export const tuiCommand: Command = {
   name: "tui",
-  summary: "Open the full screen interface",
+  summary: "Print a note: the full screen interface is not in this build",
 
   async run(ctx) {
     ctx.out.note(

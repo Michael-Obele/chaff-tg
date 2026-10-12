@@ -31,6 +31,7 @@ const EXIT_CODES: ReadonlyArray<readonly [number, string]> = [
 const EXAMPLES: readonly string[] = [
   "chaff list --muted --inactive-days 365",
   "chaff report --muted --inactive-days 365 --md --out cleanup.md",
+  "chaff check --from plans/cleanup-2026-10-11.json",
   "chaff leave --from plans/cleanup-2026-10-11.json --dry-run",
   "chaff leave --keyword signal,vip,airdrop --type channel --yes",
 ];

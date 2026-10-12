@@ -159,6 +159,8 @@ export function emptyFilters(): Filters {
     members: null,
     scam: false,
     fake: false,
+    banned: false,
+    unavailable: false,
     unread: null,
     pinned: null,
     include: [],
@@ -410,6 +412,22 @@ const FILTER_FLAGS: readonly FlagSpec[] = [
     },
   }),
   switchFlag({
+    name: "banned",
+    group: "filters",
+    help: "Chats Telegram returned as forbidden; a chat you are banned from",
+    apply: (b) => {
+      b.filters.banned = true;
+    },
+  }),
+  switchFlag({
+    name: "unavailable",
+    group: "filters",
+    help: "Chats Telegram no longer lists as available; wider than --banned",
+    apply: (b) => {
+      b.filters.unavailable = true;
+    },
+  }),
+  switchFlag({
     name: "unread",
     group: "filters",
     help: "Chats with unread messages",
@@ -511,7 +529,7 @@ const SELECTION_FLAGS: readonly FlagSpec[] = [
     name: "from",
     group: "selection",
     argument: "<file>",
-    help: "Replay a manifest written by `chaff report`",
+    help: "Replay a manifest written by `chaff report`; `check` reads its ids",
     set: (b, value) => {
       b.selection.from = value;
     },

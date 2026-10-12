@@ -53,9 +53,9 @@ const chatType = v.picklist(CHAT_TYPES);
 /**
  * The normalized record as it lands in a manifest (types.ts, `ChatRecord`).
  *
- * `manuallyUnread` arrived after version 1 and is therefore the one optional
- * field: a manifest written before it parses, and a missing value is read as
- * `false` (Telegram's default) by `parseManifest`.
+ * Three fields arrived after version 1 and are therefore optional: a manifest
+ * written before them parses, and a missing value is read as `false` (the
+ * Telegram default) by `parseManifest`.
  */
 export const chatRecordSchema = v.object({
   id: int,
@@ -71,6 +71,8 @@ export const chatRecordSchema = v.object({
   isScam: v.boolean(),
   isFake: v.boolean(),
   isVerified: v.boolean(),
+  banned: v.optional(v.boolean()),
+  unavailable: v.optional(v.boolean()),
   lastMessageAt: v.nullable(v.string()),
 });
 
@@ -99,6 +101,8 @@ export const filtersSchema = v.object({
   ),
   scam: v.optional(v.boolean()),
   fake: v.optional(v.boolean()),
+  banned: v.optional(v.boolean()),
+  unavailable: v.optional(v.boolean()),
   unread: v.optional(v.nullable(v.boolean())),
   pinned: v.optional(v.nullable(v.boolean())),
   include: v.optional(v.array(int)),
@@ -151,6 +155,8 @@ function setFilters(f: Partial<Filters>): Partial<Filters> {
   if (f.members != null) out.members = f.members;
   if (f.scam) out.scam = f.scam;
   if (f.fake) out.fake = f.fake;
+  if (f.banned) out.banned = f.banned;
+  if (f.unavailable) out.unavailable = f.unavailable;
   if (f.unread != null) out.unread = f.unread;
   if (f.pinned != null) out.pinned = f.pinned;
   if (f.include != null && f.include.length > 0) out.include = f.include;
@@ -174,6 +180,8 @@ function defaultFilters(): Filters {
     members: null,
     scam: false,
     fake: false,
+    banned: false,
+    unavailable: false,
     unread: null,
     pinned: null,
     include: [],
@@ -206,6 +214,8 @@ function hydrateFilters(serialized: Partial<Filters>): Filters {
     members: serialized.members ?? d.members,
     scam: serialized.scam ?? d.scam,
     fake: serialized.fake ?? d.fake,
+    banned: serialized.banned ?? d.banned,
+    unavailable: serialized.unavailable ?? d.unavailable,
     unread: serialized.unread ?? d.unread,
     pinned: serialized.pinned ?? d.pinned,
     include: serialized.include ?? d.include,
@@ -249,6 +259,8 @@ export function serializeManifest(p: Plan): string {
       isScam: c.isScam,
       isFake: c.isFake,
       isVerified: c.isVerified,
+      banned: c.banned,
+      unavailable: c.unavailable,
       lastMessageAt: c.lastMessageAt,
       why: c.why,
     })),
@@ -312,13 +324,18 @@ export function parseManifest(text: string): Plan {
     );
   }
   const plan = parsed.output;
-  // `manuallyUnread` is optional in the schema so a manifest written before the
-  // field existed still parses. Its default is `false` (Telegram's) and
-  // `PlanChat` declares it present, so it is filled in here rather than left
-  // `undefined` behind a type that promises otherwise.
+  // `manuallyUnread`, `banned` and `unavailable` are optional in the schema so a
+  // manifest written before they existed still parses. Their default is `false`
+  // (Telegram's) and `PlanChat` declares them present, so they are filled in
+  // here rather than left `undefined` behind a type that promises otherwise.
   return {
     ...plan,
     filters: hydrateFilters(plan.filters),
-    chats: plan.chats.map((chat) => ({ ...chat, manuallyUnread: chat.manuallyUnread ?? false })),
+    chats: plan.chats.map((chat) => ({
+      ...chat,
+      manuallyUnread: chat.manuallyUnread ?? false,
+      banned: chat.banned ?? false,
+      unavailable: chat.unavailable ?? false,
+    })),
   };
 }

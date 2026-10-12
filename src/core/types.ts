@@ -37,6 +37,23 @@ export interface ChatRecord {
   isScam: boolean;
   isFake: boolean;
   isVerified: boolean;
+  /**
+   * Whether Telegram returned this chat as forbidden (`Chat.isBanned`).
+   *
+   * A chat you are banned from comes back as `chatForbidden`,
+   * `channelForbidden` or `communityForbidden`. Telegram usually removes the
+   * dialog when that happens, so a banned peer is rare in a listing; a member
+   * count is never available for one, which is why `--members 0-0` cannot find
+   * them. `chaff check` is the way to ask about one by id.
+   */
+  banned: boolean;
+  /**
+   * Whether the chat is likely unavailable (`Chat.isLikelyUnavailable`):
+   * banned, a group you left or that was deactivated, or a private channel you
+   * are no longer a member of. Wider than {@link ChatRecord.banned}, and it
+   * therefore has false positives.
+   */
+  unavailable: boolean;
   /** ISO 8601 UTC; `null` for empty chats (never posted in). */
   lastMessageAt: string | null;
 }
@@ -67,6 +84,10 @@ export interface Filters {
   members: { min: number; max: number } | null;
   scam: boolean;
   fake: boolean;
+  /** Chats Telegram returned as forbidden, meaning banned or removed. */
+  banned: boolean;
+  /** Chats Telegram no longer lists as available; wider than `banned`. */
+  unavailable: boolean;
   unread: boolean | null;
   pinned: boolean | null;
   /** Force-include these ids even if a filter would drop them. */

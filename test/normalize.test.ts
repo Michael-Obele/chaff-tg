@@ -119,7 +119,7 @@ describe("normalizeDialog", () => {
   test("every raw chat row mirrors a dialogs.json record, or says it is extra", () => {
     const chatRows = raws.filter((raw) => peerOf(raw)["type"] === "chat");
     const extra = chatRows.filter((raw) => !byId.has(peerOf(raw)["id"] as number));
-    expect(extra.map((raw) => peerOf(raw)["id"])).toEqual([-2002, -2003]);
+    expect(extra.map((raw) => peerOf(raw)["id"])).toEqual([-2002, -2003, -1016]);
   });
 
   for (const { raw, expected } of mirrored) {
@@ -132,6 +132,23 @@ describe("normalizeDialog", () => {
     expect(normalizeDialog(asRawDialog(rawById(-1006))).manuallyUnread).toBe(true);
     expect(normalizeDialog(asRawDialog(rawById(-1001))).manuallyUnread).toBe(false);
     expect(normalizeDialog(asRawDialog(rawById(-2002))).manuallyUnread).toBe(false);
+  });
+
+  test("a forbidden peer reads as banned and unavailable, with no member count", () => {
+    // This is the only shape a banned channel can have: Telegram returns
+    // `channelForbidden`, which carries no participants count, so `--members 0-0`
+    // can never find one.
+    const row = normalizeDialog(asRawDialog(rawById(-1016)));
+    expect(row.banned).toBe(true);
+    expect(row.unavailable).toBe(true);
+    expect(row.members).toBeNull();
+    expect(row.type).toBe("supergroup");
+  });
+
+  test("an ordinary chat is neither banned nor unavailable", () => {
+    const row = normalizeDialog(asRawDialog(rawById(-1003)));
+    expect(row.banned).toBe(false);
+    expect(row.unavailable).toBe(false);
   });
 
   test("a chat with every optional property missing gets the documented defaults", () => {
@@ -149,6 +166,8 @@ describe("normalizeDialog", () => {
       isScam: false,
       isFake: false,
       isVerified: false,
+      banned: false,
+      unavailable: false,
       lastMessageAt: null,
     });
   });
@@ -214,7 +233,12 @@ describe("TelegramApi", () => {
   test("dialogs() normalizes every chat and skips private chats", async () => {
     const { client, api } = apiOver();
     const rows = await collect(api.dialogs());
-    expect(rows.map((row) => row.id)).toEqual([...chats.map((chat) => chat.id), -2002, -2003]);
+    expect(rows.map((row) => row.id)).toEqual([
+      ...chats.map((chat) => chat.id),
+      -2002,
+      -2003,
+      -1016,
+    ]);
     expect(client.yields).toBe(raws.length);
   });
 
@@ -238,6 +262,9 @@ describe("TelegramApi", () => {
         sent.push(params);
       },
       async leaveChat() {},
+      async getChat() {
+        return {};
+      },
       async getMe() {
         return { id: 1 };
       },
@@ -293,6 +320,9 @@ describe("TelegramApi", () => {
     const seam: TelegramClientLike = {
       async *iterDialogs() {},
       async leaveChat() {},
+      async getChat() {
+        return {};
+      },
       async getMe() {
         return { username: "nameless" };
       },

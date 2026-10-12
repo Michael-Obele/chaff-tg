@@ -30,24 +30,71 @@ import type { Chat, Dialog } from "@mtcute/core";
 import type { Account, ChatRecord, ChatType } from "./types";
 
 /**
- * The mtcute client narrowed to the four methods this tool uses.
+ * The mtcute client narrowed to the five methods this tool uses.
  *
  * Structural on purpose. The names are the library's own — `iterDialogs`
- * (`@mtcute/core/highlevel/client.d.ts:2153`), `leaveChat` (:1524) and `getMe`
- * (:5964), plus `destroy` (`@mtcute/bun/client.d.ts`) — so a real
- * `TelegramClient` satisfies this interface as written. `createClient` returns
- * one without a cast, which makes the type a checked statement about the
- * installed library rather than a description of it.
+ * (`@mtcute/core/highlevel/client.d.ts:2153`), `leaveChat` (:1524), `getMe`
+ * (:5964), `getChats` (:1386) and `destroy` (`@mtcute/bun/client.d.ts`) — so a
+ * real `TelegramClient` satisfies this interface as written. `createClient`
+ * returns one without a cast, which makes the type a checked statement about
+ * the installed library rather than a description of it.
  */
 export interface TelegramClientLike {
   /** `iterDialogs(params?)`: an async iterable of `Dialog`s, newest first. */
   iterDialogs(params?: unknown): AsyncIterable<unknown>;
   /** `leaveChat(chatId, { clear })`: leave one group, supergroup or channel. */
   leaveChat(chatId: unknown, params?: { clear?: boolean }): Promise<void>;
+  /** `getChat(chatId)`: one chat by id; throws when the id cannot be resolved. */
+  getChat(chatId: unknown): Promise<unknown>;
   /** `getMe()`: the authorized user. */
   getMe(): Promise<unknown>;
   /** `destroy()`: close the connection and release the session. */
   destroy(): Promise<void>;
+}
+
+/**
+ * What `chaff check` can say about one chat id.
+ *
+ * `gone` is the only status that means "this id is dead"; `banned` and
+ * `unavailable` both mean Telegram still answers for it, but will not let this
+ * account see it.
+ */
+export type ChatStatus = "ok" | "banned" | "unavailable" | "gone";
+
+/** One id's verdict: its status, and its title when Telegram still answers. */
+export interface ChatCheck {
+  id: number;
+  status: ChatStatus;
+  /** `null` when the chat is gone; there is nothing left to name. */
+  title: string | null;
+}
+
+/**
+ * The ways Telegram and mtcute say "this id is not a chat I can show you": an
+ * id Telegram rejects outright, a chat the account may no longer see, and the
+ * library's own "was not found" for an id it cannot resolve.
+ *
+ * A connect-time failure, a flood wait or a network error is deliberately NOT
+ * in here: those are the caller's to classify, and turning one into a quiet
+ * "gone" would hide a real problem behind a reassuring answer.
+ */
+const UNRESOLVABLE_RE = /CHAT_ID_INVALID|PEER_ID_INVALID|CHANNEL_PRIVATE|was not found/i;
+
+function isUnresolvable(error: unknown): boolean {
+  return error instanceof Error && UNRESOLVABLE_RE.test(error.message);
+}
+
+/** The verdict for a chat Telegram still answered for. */
+function verdictOf(id: number, chat: RawObject): ChatCheck {
+  const status: ChatStatus =
+    asBoolean(chat["isBanned"]) === true
+      ? "banned"
+      : asBoolean(chat["isLikelyUnavailable"]) === true
+        ? "unavailable"
+        : "ok";
+  // The same two spellings `normalizeDialog` accepts: `displayName` is the
+  // library's alias for the raw title.
+  return { id, status, title: asString(chat["displayName"]) ?? asString(chat["title"]) };
 }
 
 /** Credentials and the stored session a real client needs. */
@@ -196,6 +243,51 @@ export class TelegramApi {
       seen += 1;
       if (limit !== undefined && seen >= limit) return;
     }
+  }
+
+  /**
+   * Ask Telegram about chat ids this account already knows.
+   *
+   * The ids have to come from somewhere the account has seen them (a manifest,
+   * the journal): a chat that is gone has no dialog left to list, which is
+   * exactly why "find banned channels" cannot be a filter on
+   * {@link TelegramApi.dialogs} (plan/notes.md, "Banned channels").
+   *
+   * One `getChat` per id, deliberately. mtcute also offers `getChats`, which
+   * batches, but a batch is only as good as its worst id: measured against a
+   * real account, a single unresolvable id makes `getChats` throw
+   * `CHAT_ID_INVALID` for the whole call, so every other answer is lost with
+   * it. Asked one at a time, an id that cannot be resolved is one row of the
+   * report, which is the whole point of asking.
+   *
+   * A forbidden chat comes back as a chat object rather than an error, so the
+   * verdict is read off the peer:
+   *
+   * - `banned` — Telegram returned `chatForbidden`, `channelForbidden` or
+   *   `communityForbidden`;
+   * - `unavailable` — `Chat.isLikelyUnavailable`, which is wider: banned, a
+   *   group you left or that was deactivated, a private channel you are no
+   *   longer in;
+   * - `ok` — anything else Telegram still answers for;
+   * - `gone` — the id cannot be resolved any more ({@link UNRESOLVABLE_RE}).
+   *   An id that never existed and a chat that was deleted are deliberately
+   *   not distinguished: the account cannot tell them apart either.
+   *
+   * Anything else the client throws is the caller's to classify, exactly as in
+   * {@link TelegramApi.leave}.
+   */
+  async checkChats(ids: number[]): Promise<ChatCheck[]> {
+    const out: ChatCheck[] = [];
+    for (const id of ids) {
+      try {
+        const chat = asObject(await this.client.getChat(id));
+        out.push(chat === null ? { id, status: "gone", title: null } : verdictOf(id, chat));
+      } catch (error) {
+        if (!isUnresolvable(error)) throw error;
+        out.push({ id, status: "gone", title: null });
+      }
+    }
+    return out;
   }
 
   /** Leave one chat. `clear` also wipes the history of a legacy group chat. */
@@ -397,6 +489,10 @@ export function normalizeDialog(raw: RawDialog): ChatRecord {
     isScam: asBoolean(peer.isScam) ?? false,
     isFake: asBoolean(peer.isFake) ?? false,
     isVerified: asBoolean(peer.isVerified) ?? false,
+    // `isBanned`/`isLikelyUnavailable` are getters on the peer we already hold,
+    // so both are free: no extra request, no extra field to fetch.
+    banned: asBoolean(peer.isBanned) ?? false,
+    unavailable: asBoolean(peer.isLikelyUnavailable) ?? false,
     lastMessageAt: isoUtcOrNull(raw.lastMessage?.date),
   };
 }

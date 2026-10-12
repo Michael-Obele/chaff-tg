@@ -125,7 +125,15 @@ export const reportCommand: Command = {
       ctx.out.verbose(`keep ${chat.id} ${chat.title}\n`);
     }
     ctx.out.note(`Found ${plan.summary.matched} chats, about ${plan.summary.estimatedSeconds}s\n`);
-    if (out !== null) ctx.out.note(`Manifest written to ${out}\n`);
+    const format = outputFormat(ctx.args.flags);
+    if (out !== null) {
+      // Only the default table format and `--json` put a replayable manifest in
+      // `--out`; `--md` and `--csv` put the rendered table there. Saying
+      // "manifest" about a markdown file is how a user ends up handing the
+      // wrong file to `leave --from`.
+      const what = format === "md" || format === "csv" ? "Table" : "Manifest";
+      ctx.out.note(`${what} written to ${out}\n`);
+    }
 
     ctx.out.document({
       json: JSON.parse(manifest) as unknown,
@@ -135,7 +143,7 @@ export const reportCommand: Command = {
     // The sink wrote the same bytes stdout got to `--out`; under the default
     // table format those are the table, and this command's file is the
     // manifest. One overwrite, last write wins, stdout untouched.
-    if (out !== null && outputFormat(ctx.args.flags) === "table") {
+    if (out !== null && format === "table") {
       await Bun.write(out, manifest);
     }
 

@@ -67,6 +67,8 @@ function chat(id: number, title: string): PlanChat {
     isScam: false,
     isFake: false,
     isVerified: false,
+    banned: false,
+    unavailable: false,
     lastMessageAt: null,
     why: ["keyword:signal"],
   };
@@ -95,6 +97,8 @@ const NO_FILTERS: Filters = {
   members: null,
   scam: false,
   fake: false,
+  banned: false,
+  unavailable: false,
   unread: null,
   pinned: null,
   include: [],

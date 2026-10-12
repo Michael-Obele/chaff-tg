@@ -129,6 +129,16 @@ export function match(chat: ChatRecord, f: Filters, now: Date): Match {
     if (!chat.isFake) ok = false;
   }
 
+  if (f.banned) {
+    why.push("banned");
+    if (!chat.banned) ok = false;
+  }
+
+  if (f.unavailable) {
+    why.push("unavailable");
+    if (!chat.unavailable) ok = false;
+  }
+
   if (f.unread !== null) {
     why.push(f.unread ? "unread" : "read");
     // Telegram's own rule (mtcute `Dialog.isUnread`), not the raw count: a chat

@@ -324,5 +324,26 @@
     "unreadCount": 0,
     "isManuallyUnread": false,
     "lastMessage": {}
+  },
+  {
+    "peer": {
+      "type": "chat",
+      "id": -1016,
+      "chatType": "supergroup",
+      "displayName": "Forbidden Vault",
+      "username": "forbiddenvault",
+      "membersCount": null,
+      "isScam": false,
+      "isFake": false,
+      "isVerified": false,
+      "isBanned": true,
+      "isLikelyUnavailable": true
+    },
+    "isMuted": false,
+    "isArchived": false,
+    "isPinned": false,
+    "unreadCount": 0,
+    "isManuallyUnread": false,
+    "lastMessage": { "date": "2024-01-05T00:00:00Z" }
   }
 ]

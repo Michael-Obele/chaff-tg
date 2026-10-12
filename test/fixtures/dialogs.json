@@ -9,11 +9,13 @@
     "archived": false,
     "pinned": false,
     "unread": 412,
+    "manuallyUnread": false,
     "isScam": true,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2024-08-02T09:12:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2024-08-02T09:12:00Z"
   },
   {
     "id": -1002,
@@ -25,11 +27,13 @@
     "archived": true,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": true,
-    "lastMessageAt": "2025-01-15T10:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2025-01-15T10:00:00Z"
   },
   {
     "id": -1003,
@@ -41,11 +45,13 @@
     "archived": false,
     "pinned": true,
     "unread": 3,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2026-10-10T18:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-10-10T18:00:00Z"
   },
   {
     "id": -1004,
@@ -57,11 +63,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2026-09-01T12:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-09-01T12:00:00Z"
   },
   {
     "id": -1005,
@@ -73,11 +81,13 @@
     "archived": false,
     "pinned": false,
     "unread": 5,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2024-12-25T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2024-12-25T00:00:00Z"
   },
   {
     "id": -1006,
@@ -89,11 +99,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": true,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": null,
-    "manuallyUnread": true
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": null
   },
   {
     "id": -1007,
@@ -105,11 +117,13 @@
     "archived": true,
     "pinned": false,
     "unread": 42,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2026-10-09T09:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-10-09T09:00:00Z"
   },
   {
     "id": -1008,
@@ -121,11 +135,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2026-06-01T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-06-01T00:00:00Z"
   },
   {
     "id": -1009,
@@ -137,11 +153,13 @@
     "archived": false,
     "pinned": false,
     "unread": 17,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": true,
     "isVerified": false,
-    "lastMessageAt": "2026-10-10T22:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-10-10T22:00:00Z"
   },
   {
     "id": -1010,
@@ -153,11 +171,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2025-11-01T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2025-11-01T00:00:00Z"
   },
   {
     "id": -1011,
@@ -169,11 +189,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": true,
-    "lastMessageAt": "2026-10-08T14:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-10-08T14:00:00Z"
   },
   {
     "id": -1012,
@@ -185,11 +207,13 @@
     "archived": true,
     "pinned": false,
     "unread": 8,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2023-05-01T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2023-05-01T00:00:00Z"
   },
   {
     "id": -1013,
@@ -201,11 +225,13 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2026-10-11T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2026-10-11T00:00:00Z"
   },
   {
     "id": -1014,
@@ -217,11 +243,13 @@
     "archived": false,
     "pinned": false,
     "unread": 1,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2025-07-04T12:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2025-07-04T12:00:00Z"
   },
   {
     "id": -1015,
@@ -233,10 +261,12 @@
     "archived": false,
     "pinned": false,
     "unread": 0,
+    "manuallyUnread": false,
     "isScam": false,
     "isFake": false,
     "isVerified": false,
-    "lastMessageAt": "2025-10-11T00:00:00Z",
-    "manuallyUnread": false
+    "banned": false,
+    "unavailable": false,
+    "lastMessageAt": "2025-10-11T00:00:00Z"
   }
 ]

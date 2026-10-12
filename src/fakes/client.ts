@@ -257,6 +257,20 @@ export class FakeClient implements TelegramClientLike {
     this.destroyed = true;
   }
 
+  /**
+   * The fixture's own answer to `getChat`: a known id comes back as its peer,
+   * and anything else throws the way mtcute throws for an id it cannot resolve,
+   * so the `gone` path of `chaff check` is exercised offline too. A forbidden
+   * row carries `isBanned`, so `banned` is exercised from the same place.
+   */
+  async getChat(chatId: unknown): Promise<unknown> {
+    const row = this.raws.find(
+      (raw) => (raw as { peer?: { id?: unknown } } | null)?.peer?.id === chatId,
+    );
+    if (row === undefined) throw fakeRpcError("CHAT_ID_INVALID");
+    return (row as { peer: unknown }).peer;
+  }
+
   /** The `TelegramApi`-shaped leave. */
   async leave(chatId: number, opts: { clear?: boolean } = {}): Promise<void> {
     await this.leaveChat(chatId, opts);

@@ -43,6 +43,8 @@ const CHAT: PlanChat = {
   isScam: true,
   isFake: false,
   isVerified: false,
+  banned: false,
+  unavailable: false,
   lastMessageAt: "2024-08-02T09:12:00Z",
   why: ["keyword:signal", "muted", "inactive:365d"],
 };
@@ -61,6 +63,8 @@ const UNSET_FILTERS: Filters = {
   members: null,
   scam: false,
   fake: false,
+  banned: false,
+  unavailable: false,
   unread: null,
   pinned: null,
   include: [],
@@ -191,6 +195,8 @@ describe("serializeManifest", () => {
       "isScam",
       "isFake",
       "isVerified",
+      "banned",
+      "unavailable",
       "lastMessageAt",
       "why",
     ]);
@@ -212,6 +218,8 @@ describe("serializeManifest", () => {
         members: null,
         scam: false,
         fake: false,
+        banned: false,
+        unavailable: false,
         unread: false,
         pinned: null,
         include: [],
@@ -331,13 +339,15 @@ describe("parseManifest, filter re-hydration", () => {
       "members",
       "scam",
       "fake",
+      "banned",
+      "unavailable",
       "unread",
       "pinned",
       "include",
       "exclude",
       "limit",
     ]);
-    expect(Object.keys(complete)).toHaveLength(17);
+    expect(Object.keys(complete)).toHaveLength(19);
     // Set keys keep their values; unset keys get their defaults.
     expect(complete.types).toEqual(["channel", "supergroup"]);
     expect(complete.not).toEqual(["airdrop"]);
@@ -348,6 +358,8 @@ describe("parseManifest, filter re-hydration", () => {
     expect(complete.exclude).toEqual([]);
     expect(complete.scam).toBe(false);
     expect(complete.fake).toBe(false);
+    expect(complete.banned).toBe(false);
+    expect(complete.unavailable).toBe(false);
     expect(complete.regex).toBeNull();
     expect(complete.ids).toBeNull();
     expect(complete.archived).toBeNull();

@@ -299,6 +299,7 @@ chaff leave --select -1001234567890,-1009876543210 --yes
 | `chaff login`   | Asks for the my.telegram.org credentials and stores the session   |
 | `chaff whoami`  | Shows the logged-in account and where the session file lives      |
 | `chaff list`    | Lists dialogs as a table, with filters applied                    |
+| `chaff check`   | Asks Telegram about chat ids you already have: ok, banned or gone |
 | `chaff report`  | Writes a review manifest (table, JSON, CSV or markdown)           |
 | `chaff leave`   | Leaves the selected chats                                         |
 | `chaff journal` | Shows what previous runs did                                      |
@@ -309,11 +310,16 @@ chaff leave --select -1001234567890,-1009876543210 --yes
 `chaff --help` prints every filter and option; the help is rendered from the same tables
 the parser uses, so it cannot drift from what the CLI accepts.
 
+The full reference, with every flag, exit code, environment variable and worked recipe, is
+in [`docs/commands.md`](docs/commands.md).
+
 ## Filters and selection
 
-Filters worth knowing: `--muted`, `--inactive-days <n>`, `--never-posted`, `--members
+Filters worth knowing: `--muted`, `--inactive-days <n>`, `--members
 0-50`, `--scam`, `--fake`, `--type`, `-k/--keyword`, `-r/--regex`, `--archived`,
-`--read`.
+`--read`. Two more are Telegram availability, not heuristics: `--banned` (the chat came back
+forbidden) and `--unavailable` (wider: also groups you left). A banned chat is usually
+deleted from your list, which is what `chaff check` is for.
 
 Selection: `--max-leave <n>` (default 50), `--delay <ms>` (default 1200), `--clear`,
 `--select`, `--from`, `--exclude` (wins over everything), `--include`.
@@ -408,7 +414,12 @@ bun run test              # the suite, plus a guard that fails when zero tests a
 bun run typecheck         # bunx tsc --noEmit
 bunx prettier --write .   # format (or: bun run format)
 bun run build             # all eight release binaries (or: bun scripts/build.ts --target <name>)
+bun run src/cli/index.ts list --muted   # run the CLI straight from source, no `bun link`
 ```
+
+The last one is the source-run form of every `chaff` command in this README: the arguments
+are identical. Add `CHAFF_FAKE=1 CHAFF_FIXTURE=test/fixtures` in front of it to run against
+the fixture client instead of Telegram.
 
 Three rules hold the design together, and the test suite enforces them:
 
@@ -429,7 +440,7 @@ front ends on top.
 bun run test
 ```
 
-507 tests across 18 files, all offline. `bun run test` is `bun test` plus
+528 tests across 19 files, all offline. `bun run test` is `bun test` plus
 `scripts/check-tests.ts`, a guard that fails the run when it discovers zero test files. It
 is there because a suite that passes without running anything is worse than no suite.
 
@@ -517,9 +528,14 @@ and never open a socket from `test/`.
 
 ## Documentation
 
-The doc comments are the documentation. Every file in `src/core/` opens with the decision
-it embodies, in plain sentences, next to the code that makes it. Start with
-`src/core/errors.ts` for the error rules and `src/cli/commands/leave.ts` for the safety
+| Document                               | What it holds                                                                                                           |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| [`docs/commands.md`](docs/commands.md) | The command reference: every command, every flag, every exit code, the environment variables, and recipes you can copy. |
+| `plan/` (local, untracked)             | The design record: `cli.md`, `architecture.md`, `safety.md`, `notes.md`.                                                |
+
+The doc comments are the documentation for the code itself. Every file in `src/core/` opens
+with the decision it embodies, in plain sentences, next to the code that makes it. Start
+with `src/core/errors.ts` for the error rules and `src/cli/commands/leave.ts` for the safety
 gates.
 
 ## License

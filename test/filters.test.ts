@@ -44,6 +44,8 @@ function filters(overrides: Partial<Filters> = {}): Filters {
     members: null,
     scam: false,
     fake: false,
+    banned: false,
+    unavailable: false,
     unread: null,
     pinned: null,
     include: [],
@@ -532,6 +534,48 @@ describe("fixture", () => {
     // `unread > 0` rule got wrong, so both are in the fixture.
     expect(dialogs.some((d) => d.manuallyUnread)).toBe(true);
     expect(dialogs.some((d) => d.unread === 1 && !d.manuallyUnread)).toBe(true);
+  });
+});
+
+describe("banned and unavailable", () => {
+  /** A forbidden channel, exactly as the seam normalizes one: no member count. */
+  const forbidden: ChatRecord = {
+    id: -1016,
+    type: "supergroup",
+    title: "Forbidden Vault",
+    username: "forbiddenvault",
+    members: null,
+    muted: true,
+    archived: false,
+    pinned: false,
+    unread: 0,
+    manuallyUnread: false,
+    isScam: false,
+    isFake: false,
+    isVerified: false,
+    banned: true,
+    unavailable: true,
+    lastMessageAt: null,
+  };
+
+  test("--banned matches the forbidden chat and rejects an available one", () => {
+    const m = match(forbidden, filters({ banned: true }), NOW);
+    expect(m.ok).toBe(true);
+    expect(m.why).toEqual(["banned"]);
+    expect(match(chat(-1003), filters({ banned: true }), NOW).ok).toBe(false);
+  });
+
+  test("--unavailable is the wider flag", () => {
+    const m = match(forbidden, filters({ unavailable: true }), NOW);
+    expect(m.ok).toBe(true);
+    expect(m.why).toEqual(["unavailable"]);
+    expect(match(chat(-1003), filters({ unavailable: true }), NOW).ok).toBe(false);
+  });
+
+  test("a missing member count is not zero, so --members cannot find a banned chat", () => {
+    // The old idea was `--members 0-0`. It cannot work: the count is absent
+    // (not 0) and this filter excludes absent counts by design.
+    expect(match(forbidden, filters({ members: { min: 0, max: 0 } }), NOW).ok).toBe(false);
   });
 });
 

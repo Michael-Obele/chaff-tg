@@ -30,7 +30,7 @@ import { rowObject } from "../render/json";
 /**
  * The flags a chat carries, as the stable tokens the manifest's `why` uses:
  * `muted`, `archived`, `pinned`, `unread:<n>`, `unread-marked`, `scam`, `fake`,
- * `verified`.
+ * `verified`, `banned`, `unavailable`.
  *
  * `muted: null` is Telegram's "the account default", which is not a flag this
  * account chose, so it is left out rather than guessed at either way.
@@ -49,6 +49,8 @@ function flagsOf(chat: ChatRecord): string[] {
   if (chat.isScam) flags.push("scam");
   if (chat.isFake) flags.push("fake");
   if (chat.isVerified) flags.push("verified");
+  if (chat.banned) flags.push("banned");
+  if (chat.unavailable) flags.push("unavailable");
   return flags;
 }
 
