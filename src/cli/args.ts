@@ -110,6 +110,8 @@ export interface ParsedArgs {
    * copy, so this set is always safe to read as "what the command line said".
    */
   provided: ReadonlySet<string>;
+  /** `--run <id>` for `journal --run <id>`; only that command reads it. */
+  runId?: number;
 }
 
 /** Which section of the usage text a flag is documented under. */
@@ -138,6 +140,8 @@ export interface Builder {
   filters: Filters;
   selection: Selection;
   provided: Set<string>;
+  /** `--run <id>` for `journal --run <id>`; only that command reads it. */
+  runId?: number;
 }
 
 /** Every filter at the value the engine treats as unset (src/core/filters.ts). */
@@ -518,6 +522,20 @@ const SELECTION_FLAGS: readonly FlagSpec[] = [
       b.selection.force = true;
     },
   }),
+  {
+    name: "run",
+    group: "general",
+    argument: "<id>",
+    help: "Show per-chat states for a journal run",
+    set: (b, value) => {
+      const n = Number.parseInt(value.trim(), 10);
+      if (!Number.isInteger(n) || n <= 0) {
+        throw new UsageError(`--run needs a positive whole number, got ${JSON.stringify(value)}`);
+      }
+      b.runId = n;
+      b.provided.add("run");
+    },
+  },
 ];
 
 /** The output flags, in the order `plan/cli.md`, "Output" lists them. */
@@ -804,5 +822,6 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     filters: builder.filters,
     selection: builder.selection,
     provided: new Set(builder.provided),
-  };
+    runId: builder.runId,
+  } as ParsedArgs;
 }

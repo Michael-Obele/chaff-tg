@@ -34,9 +34,13 @@ import { ChaffError, EXIT } from "../core/errors";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
 import { doctorCommand } from "./commands/doctor";
+import { journalCommand } from "./commands/journal";
 import { leaveCommand } from "./commands/leave";
 import { listCommand } from "./commands/list";
+import { loginCommand } from "./commands/login";
+import { logoutCommand } from "./commands/logout";
 import { reportCommand } from "./commands/report";
+import { tuiCommand } from "./commands/tui";
 import { whoamiCommand } from "./commands/whoami";
 import { bindOutput, type CommandOutput } from "./output";
 import { renderUsage, type CommandBrief } from "./usage";
@@ -123,15 +127,15 @@ function stub(name: string, summary: string): Command {
 
 /** Every command, in the order `plan/cli.md`, "Commands" lists them. */
 export const COMMANDS: readonly Command[] = [
-  stub("login", "Ask for the my.telegram.org credentials and store the session"),
+  loginCommand,
   whoamiCommand,
   listCommand,
   reportCommand,
   leaveCommand,
-  stub("journal", "Show what previous runs did"),
+  journalCommand,
   doctorCommand,
-  stub("logout", "Delete the local session file"),
-  stub("tui", "Open the full screen interface"),
+  logoutCommand,
+  tuiCommand,
 ];
 
 /** A thrown value as a sentence: no stack trace, no `[object Object]`. */
