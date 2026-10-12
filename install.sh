@@ -161,8 +161,19 @@ if [ -n "$base_url" ]; then
   artifact_url="$base/$artifact"
   checksums_url="$base/checksums.txt"
 else
-  artifact_url="https://github.com/$REPO/releases/$tag/download/$artifact"
-  checksums_url="https://github.com/$REPO/releases/$tag/download/checksums.txt"
+  # GitHub spells the two cases differently: a pinned tag is
+  # `releases/download/<tag>/<file>`, but the latest release is
+  # `releases/latest/download/<file>`. Building `releases/<tag>/download`
+  # works for the literal tag "latest" and 404s for every real tag, which is
+  # how `--version v0.1.0` shipped broken (found 2026-10-12, on the first
+  # release, by running this against GitHub instead of a --base-url stub).
+  if [ "$tag" = "latest" ]; then
+    release="https://github.com/$REPO/releases/latest/download"
+  else
+    release="https://github.com/$REPO/releases/download/$tag"
+  fi
+  artifact_url="$release/$artifact"
+  checksums_url="$release/checksums.txt"
 fi
 
 # --- work out where it goes --------------------------------------------------

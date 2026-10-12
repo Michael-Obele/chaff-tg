@@ -92,3 +92,19 @@ jobs:
           CHAFF_FAKE=1 ./chaff list --json > list.json
           grep -q '"chats"' list.json
           echo "smoke-compile passed"
+
+      # The installer is the one file whose bug no other job can see: it builds
+      # a URL that is only wrong for a pinned tag, and release-smoke only runs
+      # at tag time. v0.1.0 shipped broken exactly this way.
+      # `releases/download/<tag>/<file>` is the shape; `releases/<tag>/download/
+      # <file>` works only for the literal tag "latest". --dry-run makes no
+      # network call, so this costs nothing.
+      - name: the installer builds GitHub's release URL shape
+        run: |
+          set -eu
+          out=$(sh install.sh --version v1.2.3 --dry-run --dir /tmp/chaff-url-check)
+          echo "$out"
+          echo "$out" | grep -q 'releases/download/v1\.2\.3/chaff-' || {
+            echo "install.sh built the wrong release URL for a pinned tag" >&2
+            exit 1
+          }

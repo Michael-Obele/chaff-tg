@@ -109,27 +109,33 @@ jobs:
       # Deliberately no checkout: this job is a user. It downloads the
       # published artifact over the public URL, verifies it against the
       # published checksums, and runs it in an empty directory.
-      - name: download and run the published Linux x64 artifact
+      - name: install the published release the way a user would, then run it
         run: |
           set -eu
           tag="$GITHUB_REF_NAME"
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          artifact="chaff-bun-linux-x64"
 
           work=$(mktemp -d)
           cd "$work"
 
-          curl -fsSL "$base/checksums.txt" -o checksums.txt
-          curl -fsSL "$base/chaff-bun-linux-x64" -o chaff
+          # The published installer, fetched from the release itself. Running it
+          # is the point: it is what builds the artifact URL for a pinned tag,
+          # and a hand-written curl in this job cannot check that path. It
+          # verifies sha256 before writing anything executable.
+          curl -fsSL "$base/install.sh" -o install.sh
+          sh install.sh --version "$tag" --dir "$work/bin"
 
-          expected=$(awk '$2 == "chaff-bun-linux-x64" { print $1 }' checksums.txt)
-          actual=$(sha256sum chaff | awk '{ print $1 }')
+          # Independent of the installer: the bytes it installed must match the
+          # checksum the release publishes.
+          expected=$(curl -fsSL "$base/checksums.txt" | awk -v n="$artifact" '$2 == n { print $1 }')
+          actual=$(sha256sum bin/chaff | awk '{ print $1 }')
           if [ "$expected" != "$actual" ]; then
             echo "checksum mismatch: expected $expected, got $actual" >&2
             exit 1
           fi
 
-          chmod 755 chaff
-          ./chaff --version
-          CHAFF_FAKE=1 ./chaff list --json > list.json
+          bin/chaff --version
+          CHAFF_FAKE=1 bin/chaff list --json > list.json
           grep -q '"chats"' list.json
           echo "release-smoke passed for $tag"

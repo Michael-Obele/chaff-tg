@@ -148,9 +148,9 @@ verifies the sha256 before writing anything executable, and installs to
 `~/.local/bin/chaff`. `--version v0.1.0` pins a release, `--dry-run` prints what it would
 do, and `--system` targets `/usr/local/bin` without ever calling `sudo` on its own.
 
-No release is tagged yet, so that one-liner has nothing to fetch today. The tag `v0.1.0` is
-what starts `.github/workflows/release.yml`: it builds the eight targets, writes the
-checksums, and re-downloads the published Linux binary to run it before anyone else does.
+`v0.1.0` is the first release, so that one-liner has something to fetch. The tag is what
+starts `.github/workflows/release.yml`: it builds the eight targets, writes the checksums,
+and re-downloads the published Linux binary to run it before anyone else does.
 
 ### macOS and Windows
 
@@ -448,11 +448,11 @@ filter set, and the flood rules. 507 tests pass with no network and no account.
 Not done yet, and not pretended otherwise: `chaff tui`, where the command prints a note
 instead of opening the full-screen OpenTUI interface.
 
-The packaging is written and has only been exercised for one target: `scripts/build.ts`
-compiles all eight, `install.sh` verifies sha256 before it writes anything executable, and
-`.github/workflows/release.yml` publishes on a `v*` tag. Only the Linux x64 binary has been
-built here, and no release is tagged, so the other seven targets are proven by CI and by
-the first tag rather than by a shipped download.
+The packaging is written and shipped: `scripts/build.ts` compiles all eight targets,
+`install.sh` verifies sha256 before it writes anything executable, and
+`.github/workflows/release.yml` publishes on a `v*` tag. `v0.1.0` is out with all eight
+binaries, so the seven targets other than Linux x64 are the release's own builds and not a
+local promise.
 
 This is `0.x` until the filter set stops changing. The manifest has its own `version`
 field, independent of the binary.
