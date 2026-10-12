@@ -1,0 +1,7 @@
+# Design docs and local agent state are not shipped code.
+# (Prettier already skips gitignored paths by default; listed explicitly
+# per plan/notes.md so that behavior never becomes load-bearing.)
+plan/
+.superpowers/
+dist/
+node_modules/

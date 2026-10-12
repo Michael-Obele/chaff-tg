@@ -1,0 +1,240 @@
+/**
+ * Where rendered output goes: stdout, plus the file `--out` names
+ * (`plan/cli.md`, "Output").
+ *
+ * Every write in `src/cli` goes through the writers on `CliContext`, never the
+ * real console, so a test can capture every byte a command produces and
+ * `--out` is the only path that touches the filesystem.
+ *
+ * `--out` receives exactly what stdout received, from the same call: a command
+ * has one primary output, so "as well as stdout" means the file holds the same
+ * bytes, not a growing log. That is why the primary-output channels are
+ * single-shot — a second document would append to stdout while the file kept
+ * only the last write, and stdout would stop being the bytes the file holds —
+ * and why the `line` channel (a live table, written row by row) is legal only
+ * when stdout is the table itself: no machine format, and no `--out` to leave
+ * behind.
+ *
+ * A machine format is a promise about stdout: `plan/cli.md` says `--json` makes
+ * every command print machine readable output, so under `--json`, `--csv` or
+ * `--md` stdout carries the payload and nothing else, and the human chatter — a
+ * note, a per-chat line — moves to stderr. Without a machine format the chatter
+ * stays on stdout beside the table, as it always has.
+ *
+ * `bindOutput` is what makes that promise structural instead of a habit. It is
+ * called once per `runCli` invocation, from inside `runCli`, and the object it
+ * returns is the only writer a command is handed: the format is already
+ * resolved and the two writers are already chosen, so a command can say *what*
+ * it emits and nothing about *where* it goes. No channel takes a format, which
+ * is the point — a Task-11 command cannot re-open the routing decision, and it
+ * has no raw writer to bypass it with.
+ *
+ * The five channels a command can use, all of them taking text and nothing
+ * else: `payload(table)` and `document({ json, table })` are the one primary
+ * output (two spellings, one single-shot rule — the first for a document that
+ * is the table's rows, the second for one that is an object); `line` is the
+ * streamed table; `note` and `verbose` are the two kinds of chatter; and
+ * `error` is the channel that always reaches stderr, whatever the format is
+ * and whatever `--quiet` says.
+ */
+import { writeFileSync } from "node:fs";
+import type { Table } from "./render/columns";
+import { renderCsv } from "./render/csv";
+import { renderJson, renderJsonValue } from "./render/json";
+import { renderMd } from "./render/md";
+import { renderTable } from "./render/table";
+
+/** The four output formats. `table` is the default. */
+export type OutputFormat = "table" | "json" | "csv" | "md";
+
+/** The output-related flags, as much of `GlobalFlags` as this module reads. */
+export interface OutputFlags {
+  json: boolean;
+  csv: boolean;
+  md: boolean;
+  out: string | null;
+}
+
+/** Anything that can receive a written chunk, i.e. a `CliContext` writer. */
+export interface OutputWriter {
+  write(s: string): unknown;
+}
+
+/** The two writers a command's sink is bound to, as `CliContext` supplies them. */
+export interface OutputStreams {
+  stdout: OutputWriter;
+  stderr: OutputWriter;
+}
+
+/** What the sink reads from the flags: the format, `--out`, and the two chatter switches. */
+export interface OutputSinkFlags extends OutputFlags {
+  quiet: boolean;
+  verbose: boolean;
+}
+
+/** The format the flags asked for. Mutually exclusive formats are a parse error. */
+export function outputFormat(flags: OutputFlags): OutputFormat {
+  if (flags.json) return "json";
+  if (flags.csv) return "csv";
+  if (flags.md) return "md";
+  return "table";
+}
+
+/** Render `table` in `format`. */
+export function renderOutput<Row>(format: OutputFormat, table: Table<Row>): string {
+  switch (format) {
+    case "json":
+      return renderJson(table);
+    case "csv":
+      return renderCsv(table);
+    case "md":
+      return renderMd(table);
+    default:
+      return renderTable(table);
+  }
+}
+
+/** Write the primary output to stdout and, when `--out` is set, to that file too. */
+export function emitOutput(stdout: OutputWriter, out: string | null, text: string): void {
+  stdout.write(text);
+  if (out !== null) writeFileSync(out, text);
+}
+
+/**
+ * The channel human chatter goes to: stderr under a machine format, stdout
+ * otherwise. Under a machine format nothing but the payload reaches stdout, so
+ * the document stays parseable no matter what the command says along the way.
+ */
+function chatterChannel(format: OutputFormat, streams: OutputStreams): OutputWriter {
+  return format === "table" ? streams.stdout : streams.stderr;
+}
+
+/**
+ * The output sink a command is handed: one format, one pair of writers, all
+ * decided before the command runs.
+ *
+ * Every channel takes exactly one argument — the text to say — and no channel
+ * takes a format. That is the whole guarantee: a command cannot pick a stream,
+ * because it is never offered one.
+ */
+export interface CommandOutput {
+  /**
+   * Render `table` in the resolved format and write it to stdout and, when
+   * `--out` is set, to that file: the same bytes, in the same call.
+   *
+   * Single-shot. A command has exactly one document, so a second call is a
+   * programming error and throws rather than appending a second document to
+   * stdout while `--out` keeps only the last write.
+   */
+  payload<Row>(table: Table<Row>): void;
+  /**
+   * The primary output whose JSON is not the table itself: `json` is printed
+   * under `--json`, and `table` is rendered under the three human formats.
+   *
+   * `plan/cli.md` says `--json` prints "one object per row or one array", so a
+   * command whose document is an object — `list`'s `{ "chats": [ … ] }`,
+   * `whoami`'s account and session — has to say both halves: the machine
+   * document and the table a person reads. They travel together through one
+   * channel for the same reason the format does not: a command says *what* its
+   * document is, and this module is the only place that decides *where* it
+   * goes. Shares `payload`'s single-shot rule, because they are one thing —
+   * the command's primary output.
+   */
+  document<Row>(document: PrimaryDocument<Row>): void;
+  /**
+   * One line of a live, human-readable stream (a table built row by row),
+   * written to stdout as it happens. Legal only when stdout *is* the table:
+   * under `--json`/`--csv`/`--md` it throws, so a command can never interleave
+   * rows with a machine document, and with `--out` it throws too, because a
+   * line the file never saw would leave stdout and the file disagreeing.
+   */
+  line(text: string): void;
+  /** A human line `--quiet` silences, routed by the bound format. */
+  note(text: string): void;
+  /** A per-chat line, printed only under `-v/--verbose`, routed by the same rule. */
+  verbose(text: string): void;
+  /**
+   * A line that is never the payload, so it always goes to stderr whatever the
+   * format is; `--quiet` does not silence it (`plan/cli.md`: `--quiet` is
+   * "errors only").
+   */
+  error(text: string): void;
+}
+
+/**
+ * The primary output as a document: what `--json` prints, and the table the
+ * three human formats render.
+ *
+ * Both halves describe the same run, which is why they are one argument: a
+ * command cannot hand over a table that says one thing and a JSON document
+ * that says another.
+ */
+export interface PrimaryDocument<Row> {
+  /** Exactly what `--json` prints. */
+  json: unknown;
+  /** What the table, `--csv` and `--md` formats render. */
+  table: Table<Row>;
+}
+
+/**
+ * Bind the resolved format and the two writers into one sink. `runCli` calls
+ * this once per invocation and hands the result to the command, so the routing
+ * is decided in one place and no caller supplies a format of its own.
+ */
+export function bindOutput(streams: OutputStreams, flags: OutputSinkFlags): CommandOutput {
+  const format = outputFormat(flags);
+  const chatter = chatterChannel(format, streams);
+  // Per invocation, not per module: each bound sink gets its own document, so a
+  // second `runCli` (or a second command in an in-process caller) is unaffected.
+  let payloadWritten = false;
+
+  // The one primary output, whichever channel writes it: `payload` and
+  // `document` are two spellings of the same thing, so they share one guard.
+  function primary(channel: string, text: string): void {
+    if (payloadWritten) {
+      throw new Error(
+        `${channel}() was called twice by one command: a command has exactly one ` +
+          "document, and a second one would be appended to stdout while --out " +
+          "kept only the last write",
+      );
+    }
+    payloadWritten = true;
+    emitOutput(streams.stdout, flags.out, text);
+  }
+
+  return {
+    payload<Row>(table: Table<Row>): void {
+      primary("payload", renderOutput(format, table));
+    },
+    document<Row>(document: PrimaryDocument<Row>): void {
+      primary(
+        "document",
+        format === "json" ? renderJsonValue(document.json) : renderOutput(format, document.table),
+      );
+    },
+    line(text: string): void {
+      if (format !== "table") {
+        throw new Error(
+          `line() is not available under --${format}: stdout carries the ` +
+            "machine document and nothing else, so emit it through payload()",
+        );
+      }
+      if (flags.out !== null) {
+        throw new Error(
+          "line() is not available with --out: the file holds exactly the bytes " +
+            "stdout received, so a line it never saw would make the two disagree",
+        );
+      }
+      streams.stdout.write(text);
+    },
+    note(text: string): void {
+      if (!flags.quiet) chatter.write(text);
+    },
+    verbose(text: string): void {
+      if (flags.verbose) chatter.write(text);
+    },
+    error(text: string): void {
+      streams.stderr.write(text);
+    },
+  };
+}

@@ -11,7 +11,12 @@ plan/
 # Build and dependency output
 dist/
 node_modules/
+*.tsbuildinfo
 
 # Editor and OS noise
 .DS_Store
 *.log
+
+# Local agent/tooling state and scratch files
+.superpowers/
+cleanup.md
