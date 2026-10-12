@@ -12,6 +12,9 @@
  *   optional `CHAFF_FIXTURE` points the fake at a directory holding
  *   `dialogs.json` and `raw-dialogs.json`; without it the fake has no dialogs,
  *   and `chaff list --json` prints `{ "chats": [] }` rather than failing.
+ *   `CHAFF_FAKE_FAILURES` (`chatId:error[:times]`, comma separated) scripts the
+ *   fake's `leaveChat` failures, which is how the leave path is exercised end
+ *   to end without provoking Telegram.
  * - **Not being logged in is a sentence, not a stack trace.** No session, a
  *   session with no credentials to open it, or a session file that exists but
  *   cannot be opened are all `NotLoggedInError`: one plain sentence ending in
@@ -30,7 +33,7 @@ import { EXIT, classify } from "../core/errors";
 import { type Paths, resolvePaths, sessionExists } from "../core/session";
 import { TelegramApi } from "../core/telegram";
 import type { Account } from "../core/types";
-import { FakeClient, loadFixtures } from "../fakes/client";
+import { FakeClient, loadFixtures, parseFakeFailures } from "../fakes/client";
 import type { CommandContext } from "./index";
 
 /**
@@ -110,9 +113,10 @@ export async function openClient(ctx: CommandContext): Promise<OpenedClient> {
 
   if (fakeRequested(env)) {
     const fixture = env.CHAFF_FIXTURE?.trim();
-    const fake = new FakeClient(
-      fixture === undefined || fixture === "" ? {} : await loadFixtures(fixture),
-    );
+    const fake = new FakeClient({
+      ...(fixture === undefined || fixture === "" ? {} : await loadFixtures(fixture)),
+      failures: parseFakeFailures(env.CHAFF_FAKE_FAILURES ?? ""),
+    });
     return { api: fake, account: await fake.me() };
   }
 

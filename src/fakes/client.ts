@@ -76,6 +76,48 @@ export function fakeRpcError(
   return new FakeRpcError(code, text);
 }
 
+/**
+ * Parse `CHAFF_FAKE_FAILURES`: `chatId:error[:times]` entries, comma separated
+ * (for example `-1002:FLOOD_WAIT_90,-1003:CHANNEL_PRIVATE:2`).
+ *
+ * This is how the tasks that must survive Telegram's answers are exercised
+ * end to end through the real front end -- the CLI builds its fake through
+ * `openClient`, and this variable is the one seam that scripts its failures
+ * without a test-only code path.
+ *
+ * A malformed entry throws with the entry in the message: it is a typo in the
+ * caller's own environment, and silently ignoring it would turn a scripted
+ * failure into a real one.
+ */
+export function parseFakeFailures(text: string): FakeFailure[] {
+  const failures: FakeFailure[] = [];
+  for (const entry of text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "")) {
+    const [idText, errorText, timesText] = entry.split(":");
+    const chatId = Number(idText);
+    if (idText === undefined || idText === "" || errorText === undefined || errorText === "") {
+      throw new Error(
+        `invalid CHAFF_FAKE_FAILURES entry ${JSON.stringify(entry)}: expected chatId:error[:times]`,
+      );
+    }
+    const failure: FakeFailure = { chatId, error: fakeRpcError(errorText) };
+    if (timesText !== undefined) {
+      const times = Number(timesText);
+      if (!Number.isInteger(times) || times < 1) {
+        throw new Error(
+          `invalid CHAFF_FAKE_FAILURES count ${JSON.stringify(timesText)} in ` +
+            `${JSON.stringify(entry)}: expected a whole number of attempts`,
+        );
+      }
+      failure.times = times;
+    }
+    failures.push(failure);
+  }
+  return failures;
+}
+
 /** One scripted `leaveChat` failure. */
 export interface FakeFailure {
   /** The chat whose leave request fails. */

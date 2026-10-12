@@ -34,6 +34,7 @@ import { ChaffError, EXIT } from "../core/errors";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
 import { doctorCommand } from "./commands/doctor";
+import { leaveCommand } from "./commands/leave";
 import { listCommand } from "./commands/list";
 import { reportCommand } from "./commands/report";
 import { whoamiCommand } from "./commands/whoami";
@@ -126,7 +127,7 @@ export const COMMANDS: readonly Command[] = [
   whoamiCommand,
   listCommand,
   reportCommand,
-  stub("leave", "Leave the selected chats"),
+  leaveCommand,
   stub("journal", "Show what previous runs did"),
   doctorCommand,
   stub("logout", "Delete the local session file"),

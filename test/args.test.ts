@@ -329,7 +329,7 @@ describe("runCli: dispatch, version, help, and stubs", () => {
    * list as they land. Listed by name, so landing one is a one-line edit here
    * rather than a silently weaker loop.
    */
-  const NOT_BUILT_YET = ["login", "leave", "journal", "logout", "tui"] as const;
+  const NOT_BUILT_YET = ["login", "journal", "logout", "tui"] as const;
 
   test("the commands that are not built yet are stubs that exit 1 and say so", async () => {
     for (const name of NOT_BUILT_YET) {
@@ -418,7 +418,7 @@ describe("runCli: a command cannot choose its stream", () => {
 
   test("under --json a command's error line still goes to stderr", async () => {
     const io = capture();
-    expect(await runCli({ ...io.ctx, argv: ["--json", "leave"] })).toBe(EXIT.ERROR);
+    expect(await runCli({ ...io.ctx, argv: ["--json", "journal"] })).toBe(EXIT.ERROR);
     expect(io.stdout.text()).toBe("");
     expect(io.stderr.text()).toContain("not implemented");
   });
