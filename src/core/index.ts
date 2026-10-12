@@ -7,7 +7,7 @@
  */
 
 /** Keep in sync with `package.json` "version"; asserted by test/smoke.test.ts. */
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 //
 // The plan surface: the plan builder and the types it produces. The filter

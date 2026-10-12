@@ -156,12 +156,13 @@ curl -fsSL https://raw.githubusercontent.com/Michael-Obele/chaff-tg/main/install
 
 `install.sh` detects the OS and CPU, downloads the matching binary and `checksums.txt`,
 verifies the sha256 before writing anything executable, and installs to
-`~/.local/bin/chaff`. `--version v0.1.0` pins a release, `--dry-run` prints what it would
-do, and `--system` targets `/usr/local/bin` without ever calling `sudo` on its own.
+`~/.local/bin/chaff`. `--version <tag>` pins a release (for example `--version v0.1.0`),
+`--dry-run` prints what it would do, and `--system` targets `/usr/local/bin` without ever
+calling `sudo` on its own.
 
-`v0.1.0` is the first release, so that one-liner has something to fetch. The tag is what
-starts `.github/workflows/release.yml`: it builds the eight targets, writes the checksums,
-and re-downloads the published Linux binary to run it before anyone else does.
+Releases are published, so that one-liner has something to fetch. Pushing a `v*` tag is
+what starts `.github/workflows/release.yml`: it builds the eight targets, writes the
+checksums, and re-downloads the published Linux binary to run it before anyone else does.
 
 ### macOS and Windows
 
@@ -462,9 +463,9 @@ instead of opening the full-screen OpenTUI interface.
 
 The packaging is written and shipped: `scripts/build.ts` compiles all eight targets,
 `install.sh` verifies sha256 before it writes anything executable, and
-`.github/workflows/release.yml` publishes on a `v*` tag. `v0.1.0` is out with all eight
-binaries, so the seven targets other than Linux x64 are the release's own builds and not a
-local promise.
+`.github/workflows/release.yml` publishes on a `v*` tag. The first release, `v0.1.0`,
+shipped all eight binaries, so the seven targets other than Linux x64 are real release
+builds and not a local promise.
 
 This is `0.x` until the filter set stops changing. The manifest has its own `version`
 field, independent of the binary.
