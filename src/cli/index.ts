@@ -35,6 +35,7 @@ import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
 import { doctorCommand } from "./commands/doctor";
 import { listCommand } from "./commands/list";
+import { reportCommand } from "./commands/report";
 import { whoamiCommand } from "./commands/whoami";
 import { bindOutput, type CommandOutput } from "./output";
 import { renderUsage, type CommandBrief } from "./usage";
@@ -124,7 +125,7 @@ export const COMMANDS: readonly Command[] = [
   stub("login", "Ask for the my.telegram.org credentials and store the session"),
   whoamiCommand,
   listCommand,
-  stub("report", "Write a review manifest (table, JSON, CSV or markdown)"),
+  reportCommand,
   stub("leave", "Leave the selected chats"),
   stub("journal", "Show what previous runs did"),
   doctorCommand,

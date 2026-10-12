@@ -73,8 +73,11 @@ function looser(mode: number): boolean {
  * the session may be a plain subdirectory of a repository, and `.git` may be a
  * directory (a normal checkout) or a file (a worktree or a submodule), so this
  * asks whether the entry exists rather than what it is.
+ *
+ * Exported because `chaff report` asks the same question about the directory
+ * `--out` points into, and one walk beats two copies of it.
  */
-function gitRepositoryOf(dir: string): { inside: boolean; root: string | null } {
+export function gitRepositoryOf(dir: string): { inside: boolean; root: string | null } {
   let current = dir;
   for (;;) {
     if (existsSync(join(current, ".git"))) return { inside: true, root: current };
