@@ -93,11 +93,22 @@ code:
 
 ## Quick start
 
+From a source checkout:
+
 ```bash
 git clone https://github.com/Michael-Obele/chaff-tg
 cd chaff-tg
 bun install
+bun link                     # this is what puts `chaff` on your PATH
 ```
+
+`bun link` is not optional: until it runs there is no `chaff` command, and every command
+below fails with `command not found`. If you would rather not touch your global bun setup,
+run `bun run src/cli/index.ts` in place of `chaff`; the arguments are identical.
+
+Not a checkout? [Install from a release](#from-a-release) is one command, needs no clone
+and no `bun link`, and you can skip the `cp` below because `chaff login` asks for the two
+values itself.
 
 Then log in and look before you touch anything:
 
@@ -137,7 +148,7 @@ bun scripts/build.ts --target bun-linux-x64    # dist/chaff-bun-linux-x64
 
 ### From a release
 
-Once a release is published, one command on a fresh machine:
+One command on a fresh machine:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Michael-Obele/chaff-tg/main/install.sh | sh
@@ -164,8 +175,9 @@ There are no code signing certificates behind this, so both platforms warn first
 
 ### Uninstall
 
-`rm ~/.local/bin/chaff`. There is no daemon, no service, no scheduled task, and no state
-anywhere else. `chaff logout` is what deletes the session file.
+`rm ~/.local/bin/chaff`, or `bun unlink` if you installed with `bun link`. There is no
+daemon, no service, no scheduled task, and no state anywhere else. `chaff logout` is what
+deletes the session file.
 
 ## Setup
 
@@ -512,6 +524,6 @@ MIT. See [LICENSE](LICENSE). It touches your account, so the code should be read
 [badge-bun]: https://img.shields.io/badge/bun-%E2%89%A51.4.0-000?style=flat-square
 [badge-license]: https://img.shields.io/badge/license-MIT-blue?style=flat-square
 [badge-local]: https://img.shields.io/badge/session-stays%20local-2ea043?style=flat-square
-[badge-tests]: https://img.shields.io/badge/tests-502%20passing-2ea043?style=flat-square
+[badge-tests]: https://img.shields.io/badge/tests-507%20passing-2ea043?style=flat-square
 [bun]: https://bun.com
 [license]: LICENSE
