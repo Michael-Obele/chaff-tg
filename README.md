@@ -164,6 +164,13 @@ Releases are published, so that one-liner has something to fetch. Pushing a `v*`
 what starts `.github/workflows/release.yml`: it builds the eight targets, writes the
 checksums, and re-downloads the published Linux binary to run it before anyone else does.
 
+**The tag is the version.** `v0.2.0` is what the binaries report, because the release job
+stamps the tag into the build, and the `gates` job refuses to build when the tag and
+`package.json` disagree. That is what stops a release from shipping a `--version` nobody
+can find. Which commit prefix earns which bump (`fix` a patch, `feat` a minor, `feat!` a
+minor while `0.x`, a major from `1.0.0`) is written at the top of the workflow, next to the
+four step release dance.
+
 ### macOS and Windows
 
 There are no code signing certificates behind this, so both platforms warn first:
@@ -414,6 +421,7 @@ bun run test              # the suite, plus a guard that fails when zero tests a
 bun run typecheck         # bunx tsc --noEmit
 bunx prettier --write .   # format (or: bun run format)
 bun run build             # all eight release binaries (or: bun scripts/build.ts --target <name>)
+bun scripts/build.ts --version 0.2.0   # stamp a version instead of reading package.json
 bun run src/cli/index.ts list --muted   # run the CLI straight from source, no `bun link`
 ```
 

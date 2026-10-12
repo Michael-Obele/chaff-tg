@@ -7,6 +7,37 @@ name: Release
 #
 # `release` is idempotent so a failed `release-smoke` can be re-run with the
 # upload fixed, rather than needing a new tag.
+#
+# THE TAG IS THE VERSION. `v0.2.0` is what the binaries report, because the build
+# job passes `--version "${GITHUB_REF_NAME#v}"` to scripts/build.ts, and the gates
+# job refuses to build at all unless the tag and `package.json` agree. That one
+# rule is what stops a release from shipping binaries whose `--version` names a
+# build nobody can find.
+#
+# WHICH COMMIT MESSAGE BUMPS WHAT. Conventional Commits, and the strongest prefix
+# in the release window wins:
+#
+#   fix(...)          patch   0.2.0 -> 0.2.1   a bug fix, no new flag or field
+#   feat(...)         minor   0.2.1 -> 0.3.0   a new command, flag, field or doc page
+#   feat(...)! or BREAKING CHANGE
+#                     minor while 0.x, major from 1.0.0. Before 1.0 the minor
+#                     number is the compatibility signal, so a removed or
+#                     re-meaning flag is a minor, not a major.
+#   chore, docs, test, ci, refactor, perf
+#                     no bump on their own; they ride along with the next release
+#
+# THE RELEASE DANCE, in order:
+#
+#   1. bump `package.json` and `src/core/index.ts` together (they carry the same
+#      number, and `bun run test` fails when they disagree)
+#   2. commit as `chore(release): 0.2.0`
+#   3. `git tag v0.2.0`
+#   4. push the branch, then push the tag. Pushing the tag is the only step that
+#      publishes anything.
+#
+# The release notes are generated from the commits in the window
+# (`--generate-notes`), which is why the commit prefixes above matter twice: they
+# decide the bump and they are what the notes are made of.
 
 on:
   push:
@@ -27,6 +58,20 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      # Version agreement first, because it is the cheapest failure and the one
+      # that would be discovered last otherwise: a mismatch here means the eight
+      # released binaries would all report a version the tag does not claim.
+      - name: the tag matches package.json
+        run: |
+          set -eu
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version=$(jq -r .version package.json)
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $pkg_version" >&2
+            echo "bump package.json and src/core/index.ts, commit, delete the tag, re-tag" >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches package.json $pkg_version"
       - run: bun install --frozen-lockfile
       # One job rather than three: the three commands take seconds each, and
       # three runners to run them is three checkout-and-install cycles for
@@ -67,7 +112,15 @@ jobs:
       # that are present (plan/distribution.md, "Build script"). Nothing
       # imports it today, so the plain install is enough and much smaller.
       - run: bun install --frozen-lockfile
-      - run: bun scripts/build.ts --target ${{ matrix.target }}
+      # The tag is the version (see the note at the top of this file), so the build
+      # stamps it. The commit is passed in rather than read from git: this is the commit
+      # the tag points at, and it is what `chaff --version` prints beside the version.
+      - name: build ${{ matrix.target }}
+        env:
+          CHAFF_COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          bun scripts/build.ts --target ${{ matrix.target }} --version "${GITHUB_REF_NAME#v}"
       - uses: actions/upload-artifact@v7
         with:
           name: chaff-${{ matrix.target }}
@@ -135,7 +188,18 @@ jobs:
             exit 1
           fi
 
-          bin/chaff --version
+          # The stamp is the whole point of the tag: a released binary has to report the
+          # version its release claims, never "dev" and never whatever package.json
+          # happened to say at the time. `chaff --version` prints `chaff <version> (<commit>)`.
+          reported=$(bin/chaff --version)
+          echo "$reported"
+          case "$reported" in
+            "chaff ${tag#v} ("*) ;;
+            *)
+              echo "the published binary reports '$reported', not '$tag'" >&2
+              exit 1
+              ;;
+          esac
           CHAFF_FAKE=1 bin/chaff list --json > list.json
           grep -q '"chats"' list.json
           echo "release-smoke passed for $tag"
