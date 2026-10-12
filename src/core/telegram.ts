@@ -163,17 +163,34 @@ export class TelegramApi {
    * first), skipping private chats and bots: they are not chats this tool can
    * leave, and `ChatRecord` has no shape for them.
    *
+   * The two parameters are decided by the client's own contract, read from
+   * `@mtcute/core/highlevel/methods/dialogs/iter-dialogs.js` rather than
+   * assumed:
+   *
+   * - **`archived: "keep"` is required, not a preference.** `iterDialogs`
+   *   defaults to `archived: "exclude"`, which fetches the main folder only.
+   *   Left at the default, no archived dialog ever reaches this method, so
+   *   `--archived` could never match a live account and `--no-archived` was
+   *   trivially true. Asking for both folders keeps the split this module
+   *   promises: the seam gathers, the pure filter decides (`src/core/filters.ts`).
+   * - **`limit` is deliberately NOT forwarded.** The client's `limit` caps the
+   *   dialogs it hands out, and that stream carries users and bots too, which
+   *   the line below skips. Forwarding it spends the caller's `--limit` on peers
+   *   that can never become a record, so the caller would silently get fewer
+   *   rows than it asked for. The cap belongs here, on the records, which is
+   *   what `--limit` documents ("maximum rows to gather"). The price is at most
+   *   one extra chunk of `chunkSize` dialogs fetched from the client.
+   *
    * `limit` stops iterating as soon as that many records have been yielded —
-   * a skipped chat does not consume a slot — and `0` yields nothing without
+   * a skipped peer does not consume a slot — and `0` yields nothing without
    * touching the client at all.
    */
   async *dialogs(opts: { limit?: number } = {}): AsyncIterable<ChatRecord> {
     const limit = opts.limit;
     if (limit !== undefined && limit <= 0) return;
 
-    const params = limit === undefined ? {} : { limit };
     let seen = 0;
-    for await (const raw of this.client.iterDialogs(params)) {
+    for await (const raw of this.client.iterDialogs({ archived: "keep" })) {
       if (!isChatDialog(raw)) continue;
       yield normalizeDialog(raw);
       seen += 1;
@@ -314,7 +331,13 @@ function isDialogLike(value: unknown): boolean {
  */
 export type RawDialog = Pick<
   Dialog,
-  "peer" | "isMuted" | "isArchived" | "isPinned" | "unreadCount" | "lastMessage"
+  | "peer"
+  | "isMuted"
+  | "isArchived"
+  | "isPinned"
+  | "unreadCount"
+  | "isManuallyUnread"
+  | "lastMessage"
 >;
 
 /**
@@ -331,9 +354,10 @@ export type RawDialog = Pick<
  * the dialog was read (the library resolves a mute's expiry against its own
  * clock), so a `ChatRecord` is not a clock-free snapshot.
  *
- * `neverPosted` is deliberately absent, not `false`: finding out whether the
- * account ever posted in a chat costs one request per chat, so it is opt-in and
- * a later task fills it in.
+ * `manuallyUnread` is read from the same dialog as `unread`: Telegram badges a
+ * chat as unread when the account marked it unread or it holds more than one
+ * unread message (mtcute `Dialog.isUnread`), so the count alone cannot answer
+ * `--unread` honestly.
  */
 export function normalizeDialog(raw: RawDialog): ChatRecord {
   if (!isDialogLike(raw)) {
@@ -369,6 +393,7 @@ export function normalizeDialog(raw: RawDialog): ChatRecord {
     archived: asBoolean(raw.isArchived) ?? false,
     pinned: asBoolean(raw.isPinned) ?? false,
     unread: asNumber(raw.unreadCount) ?? 0,
+    manuallyUnread: asBoolean(raw.isManuallyUnread) ?? false,
     isScam: asBoolean(peer.isScam) ?? false,
     isFake: asBoolean(peer.isFake) ?? false,
     isVerified: asBoolean(peer.isVerified) ?? false,

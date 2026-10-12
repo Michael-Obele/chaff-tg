@@ -156,7 +156,6 @@ export function emptyFilters(): Filters {
     muted: null,
     archived: null,
     inactiveDays: null,
-    neverPosted: false,
     members: null,
     scam: false,
     fake: false,
@@ -177,6 +176,20 @@ const CHAT_TYPES: ReadonlySet<string> = new Set([
   "monoforum",
   "community",
 ]);
+
+/**
+ * What `--type group` means: the whole group family, not the legacy spelling.
+ *
+ * Telegram represents a "group" three ways (`Chat.chatType`): a legacy basic
+ * group (`group`), a supergroup (`supergroup`) and a broadcast group
+ * (`gigagroup`). Official clients call all three "Groups" and silently migrate
+ * the legacy kind into a supergroup the moment a feature needs one (mtcute
+ * guide, "Peers"), so `group` alone matches almost nothing on a live account:
+ * measured against Michael's, 0 of 60 dialogs are `group` while 13 are
+ * `supergroup`. A user typing `--type group` means the family, so the family is
+ * what it resolves to; the narrower spellings stay available for precision.
+ */
+const GROUP_FAMILY: readonly ChatType[] = ["group", "supergroup", "gigagroup"];
 
 /** A whole, non-negative number: `--limit 25`, `--max-leave 0`. */
 const WHOLE_NUMBER = /^\d+$/;
@@ -242,14 +255,19 @@ function memberRange(value: string, flag: string): { min: number; max: number } 
 
 /** Read `--type`'s comma separated chat types, refusing anything Telegram has no name for. */
 function chatTypes(value: string, flag: string): ChatType[] {
-  return words(value).map((word) => {
+  const out: ChatType[] = [];
+  for (const word of words(value)) {
     if (!CHAT_TYPES.has(word)) {
       throw new UsageError(
         `${flag} accepts ${[...CHAT_TYPES].join(", ")}, got ${JSON.stringify(word)}`,
       );
     }
-    return word as ChatType;
-  });
+    // `group` is the family (see GROUP_FAMILY); everything else is itself.
+    for (const type of word === "group" ? GROUP_FAMILY : [word as ChatType]) {
+      if (!out.includes(type)) out.push(type);
+    }
+  }
+  return out;
 }
 
 /** A switch row: records the flag and nothing else. */
@@ -272,7 +290,7 @@ const FILTER_FLAGS: readonly FlagSpec[] = [
     name: "type",
     group: "filters",
     argument: "<list>",
-    help: "Chat types: group, supergroup, channel, gigagroup (comma separated). Default: all",
+    help: "Chat types: group (the whole group family), supergroup, channel, gigagroup, monoforum, community. Default: all",
     set: (b, value) => {
       b.filters.types = chatTypes(value, "--type");
     },
@@ -366,14 +384,6 @@ const FILTER_FLAGS: readonly FlagSpec[] = [
       b.filters.inactiveDays = wholeNumber(value, "--inactive-days", 0);
     },
   },
-  switchFlag({
-    name: "never-posted",
-    group: "filters",
-    help: "You have never sent a message there. Slower: one search per chat",
-    apply: (b) => {
-      b.filters.neverPosted = true;
-    },
-  }),
   {
     name: "members",
     group: "filters",

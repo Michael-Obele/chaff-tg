@@ -39,6 +39,7 @@ const CHAT: PlanChat = {
   archived: false,
   pinned: false,
   unread: 412,
+  manuallyUnread: false,
   isScam: true,
   isFake: false,
   isVerified: false,
@@ -57,7 +58,6 @@ const UNSET_FILTERS: Filters = {
   muted: null,
   archived: null,
   inactiveDays: null,
-  neverPosted: false,
   members: null,
   scam: false,
   fake: false,
@@ -137,9 +137,18 @@ describe("serializeManifest", () => {
   test("round-trips nullable and optional chat fields", () => {
     const plan: Plan = {
       ...EXAMPLE,
-      chats: [{ ...CHAT, username: null, members: null, lastMessageAt: null, neverPosted: true }],
+      chats: [{ ...CHAT, username: null, members: null, lastMessageAt: null }],
     };
     expect(parseManifest(serializeManifest(plan))).toEqual(plan);
+  });
+
+  test("reads a manifest written before `manuallyUnread` existed as not marked", () => {
+    // The field arrived after version 1, so an older file simply lacks it; the
+    // schema makes it optional and `parseManifest` fills in Telegram's default.
+    const json = JSON.parse(serializeManifest(EXAMPLE)) as Record<string, unknown>;
+    const chats = json.chats as Array<Record<string, unknown>>;
+    delete chats[0]!.manuallyUnread;
+    expect(parseManifest(JSON.stringify(json)).chats[0]!.manuallyUnread).toBe(false);
   });
 
   test("writes 2-space indent and exactly one trailing newline", () => {
@@ -178,6 +187,7 @@ describe("serializeManifest", () => {
       "archived",
       "pinned",
       "unread",
+      "manuallyUnread",
       "isScam",
       "isFake",
       "isVerified",
@@ -199,7 +209,6 @@ describe("serializeManifest", () => {
         muted: false,
         archived: null,
         inactiveDays: null,
-        neverPosted: false,
         members: null,
         scam: false,
         fake: false,
@@ -213,7 +222,7 @@ describe("serializeManifest", () => {
     const json = JSON.parse(serializeManifest(plan));
     // Kept: `muted: false` (--not-muted) and `unread: false` (--read) are
     // directions. Dropped: nulls, empty term lists, and the plain-boolean
-    // switches (`neverPosted`/`scam`/`fake`) where false means unset.
+    // switches (`scam`/`fake`) where false means unset.
     expect(Object.keys(json.filters)).toEqual(["muted", "unread"]);
   });
 
@@ -319,7 +328,6 @@ describe("parseManifest, filter re-hydration", () => {
       "muted",
       "archived",
       "inactiveDays",
-      "neverPosted",
       "members",
       "scam",
       "fake",
@@ -329,7 +337,7 @@ describe("parseManifest, filter re-hydration", () => {
       "exclude",
       "limit",
     ]);
-    expect(Object.keys(complete)).toHaveLength(18);
+    expect(Object.keys(complete)).toHaveLength(17);
     // Set keys keep their values; unset keys get their defaults.
     expect(complete.types).toEqual(["channel", "supergroup"]);
     expect(complete.not).toEqual(["airdrop"]);
@@ -338,7 +346,6 @@ describe("parseManifest, filter re-hydration", () => {
     expect(complete.any).toEqual([]);
     expect(complete.include).toEqual([]);
     expect(complete.exclude).toEqual([]);
-    expect(complete.neverPosted).toBe(false);
     expect(complete.scam).toBe(false);
     expect(complete.fake).toBe(false);
     expect(complete.regex).toBeNull();

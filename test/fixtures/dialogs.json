@@ -13,7 +13,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2024-08-02T09:12:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1002,
@@ -29,7 +29,7 @@
     "isFake": false,
     "isVerified": true,
     "lastMessageAt": "2025-01-15T10:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1003,
@@ -45,7 +45,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2026-10-10T18:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1004,
@@ -61,7 +61,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2026-09-01T12:00:00Z",
-    "neverPosted": null
+    "manuallyUnread": false
   },
   {
     "id": -1005,
@@ -77,7 +77,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2024-12-25T00:00:00Z",
-    "neverPosted": true
+    "manuallyUnread": false
   },
   {
     "id": -1006,
@@ -93,7 +93,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": null,
-    "neverPosted": true
+    "manuallyUnread": true
   },
   {
     "id": -1007,
@@ -109,7 +109,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2026-10-09T09:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1008,
@@ -125,7 +125,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2026-06-01T00:00:00Z",
-    "neverPosted": null
+    "manuallyUnread": false
   },
   {
     "id": -1009,
@@ -141,7 +141,7 @@
     "isFake": true,
     "isVerified": false,
     "lastMessageAt": "2026-10-10T22:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1010,
@@ -157,7 +157,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2025-11-01T00:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1011,
@@ -173,7 +173,7 @@
     "isFake": false,
     "isVerified": true,
     "lastMessageAt": "2026-10-08T14:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1012,
@@ -189,7 +189,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2023-05-01T00:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1013,
@@ -205,7 +205,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2026-10-11T00:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1014,
@@ -221,7 +221,7 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2025-07-04T12:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   },
   {
     "id": -1015,
@@ -237,6 +237,6 @@
     "isFake": false,
     "isVerified": false,
     "lastMessageAt": "2025-10-11T00:00:00Z",
-    "neverPosted": false
+    "manuallyUnread": false
   }
 ]

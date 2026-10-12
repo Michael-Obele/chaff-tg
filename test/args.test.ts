@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXIT } from "../src/core/errors";
 import { DEFAULT_CONFIG } from "../src/core/index";
@@ -31,6 +32,24 @@ const FILTER_ROWS: ReadonlyArray<{ flag: string; argv: string[]; want: Partial<F
     argv: ["--type", "channel,supergroup"],
     want: { types: ["channel", "supergroup"] },
   },
+  // `group` is the family: a legacy basic group, a supergroup and a broadcast
+  // group are all "Groups" in Telegram's own clients, and the legacy kind alone
+  // matches nothing on a live account (mtcute guide, "Peers").
+  {
+    flag: "--type group",
+    argv: ["--type", "group"],
+    want: { types: ["group", "supergroup", "gigagroup"] },
+  },
+  {
+    flag: "--type group,group",
+    argv: ["--type", "group,group"],
+    want: { types: ["group", "supergroup", "gigagroup"] },
+  },
+  {
+    flag: "--type group,channel",
+    argv: ["--type", "group,channel"],
+    want: { types: ["group", "supergroup", "gigagroup", "channel"] },
+  },
   { flag: "-k/--keyword", argv: ["-k", "signal,vip"], want: { keyword: ["signal", "vip"] } },
   { flag: "--keyword", argv: ["--keyword", " Signal , "], want: { keyword: ["Signal"] } },
   { flag: "-K/--any", argv: ["-K", "vip,airdrop"], want: { any: ["vip", "airdrop"] } },
@@ -44,7 +63,6 @@ const FILTER_ROWS: ReadonlyArray<{ flag: string; argv: string[]; want: Partial<F
   { flag: "--archived", argv: ["--archived"], want: { archived: true } },
   { flag: "--no-archived", argv: ["--no-archived"], want: { archived: false } },
   { flag: "--inactive-days", argv: ["--inactive-days", "365"], want: { inactiveDays: 365 } },
-  { flag: "--never-posted", argv: ["--never-posted"], want: { neverPosted: true } },
   { flag: "--members", argv: ["--members", "0-50"], want: { members: { min: 0, max: 50 } } },
   { flag: "--scam", argv: ["--scam"], want: { scam: true } },
   { flag: "--fake", argv: ["--fake"], want: { fake: true } },
@@ -68,7 +86,6 @@ const UNSET_FILTERS: Filters = {
   muted: null,
   archived: null,
   inactiveDays: null,
-  neverPosted: false,
   members: null,
   scam: false,
   fake: false,
@@ -356,10 +373,28 @@ describe("runCli: dispatch, version, help, and stubs", () => {
   });
 
   test("runCli never returns a code the core does not define", async () => {
+    // The dispatch has to reach a real command, and `env: {}` would resolve the
+    // REAL data directory: on a machine with a session in it, `list` opened a
+    // socket to Telegram (AGENTS.md rule 1 says `test/` never does) and hung past
+    // this test's own timeout, while staying green wherever no session exists.
+    // A throwaway root keeps the same dispatch honest and offline.
     const codes = new Set<number>(Object.values(EXIT));
-    const io = capture();
-    const code = await runCli({ ...io.ctx, argv: ["list"] });
-    expect(codes.has(code)).toBe(true);
+    const root = mkdtempSync(join(tmpdir(), "chaff-dispatch-"));
+    try {
+      const io = capture();
+      const code = await runCli({
+        ...io.ctx,
+        env: {
+          HOME: root,
+          XDG_DATA_HOME: join(root, "data"),
+          XDG_CONFIG_HOME: join(root, "config"),
+        },
+        argv: ["list"],
+      });
+      expect(codes.has(code)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

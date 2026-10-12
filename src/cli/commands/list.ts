@@ -29,11 +29,15 @@ import { rowObject } from "../render/json";
 
 /**
  * The flags a chat carries, as the stable tokens the manifest's `why` uses:
- * `muted`, `archived`, `pinned`, `unread:<n>`, `scam`, `fake`, `verified`,
- * `never-posted`.
+ * `muted`, `archived`, `pinned`, `unread:<n>`, `unread-marked`, `scam`, `fake`,
+ * `verified`.
  *
  * `muted: null` is Telegram's "the account default", which is not a flag this
  * account chose, so it is left out rather than guessed at either way.
+ *
+ * `unread-marked` is separate from `unread:<n>` because Telegram treats them
+ * separately: the count badges a dialog above one unread message, and the mark
+ * badges it with none at all (`Dialog.isUnread`).
  */
 function flagsOf(chat: ChatRecord): string[] {
   const flags: string[] = [];
@@ -41,10 +45,10 @@ function flagsOf(chat: ChatRecord): string[] {
   if (chat.archived) flags.push("archived");
   if (chat.pinned) flags.push("pinned");
   if (chat.unread > 0) flags.push(`unread:${chat.unread}`);
+  if (chat.manuallyUnread) flags.push("unread-marked");
   if (chat.isScam) flags.push("scam");
   if (chat.isFake) flags.push("fake");
   if (chat.isVerified) flags.push("verified");
-  if (chat.neverPosted === true) flags.push("never-posted");
   return flags;
 }
 

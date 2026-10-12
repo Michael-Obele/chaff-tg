@@ -52,7 +52,10 @@ const chatType = v.picklist(CHAT_TYPES);
 
 /**
  * The normalized record as it lands in a manifest (types.ts, `ChatRecord`).
- * `neverPosted` is opt-in, so it is the only optional field.
+ *
+ * `manuallyUnread` arrived after version 1 and is therefore the one optional
+ * field: a manifest written before it parses, and a missing value is read as
+ * `false` (Telegram's default) by `parseManifest`.
  */
 export const chatRecordSchema = v.object({
   id: int,
@@ -64,11 +67,11 @@ export const chatRecordSchema = v.object({
   archived: v.boolean(),
   pinned: v.boolean(),
   unread: int,
+  manuallyUnread: v.optional(v.boolean()),
   isScam: v.boolean(),
   isFake: v.boolean(),
   isVerified: v.boolean(),
   lastMessageAt: v.nullable(v.string()),
-  neverPosted: v.optional(v.nullable(v.boolean())),
 });
 
 /**
@@ -86,7 +89,6 @@ export const filtersSchema = v.object({
   muted: v.optional(v.nullable(v.boolean())),
   archived: v.optional(v.nullable(v.boolean())),
   inactiveDays: v.optional(v.nullable(int)),
-  neverPosted: v.optional(v.boolean()),
   members: v.optional(
     v.nullable(
       v.object({
@@ -146,7 +148,6 @@ function setFilters(f: Partial<Filters>): Partial<Filters> {
   if (f.muted != null) out.muted = f.muted;
   if (f.archived != null) out.archived = f.archived;
   if (f.inactiveDays != null) out.inactiveDays = f.inactiveDays;
-  if (f.neverPosted) out.neverPosted = f.neverPosted;
   if (f.members != null) out.members = f.members;
   if (f.scam) out.scam = f.scam;
   if (f.fake) out.fake = f.fake;
@@ -170,7 +171,6 @@ function defaultFilters(): Filters {
     muted: null,
     archived: null,
     inactiveDays: null,
-    neverPosted: false,
     members: null,
     scam: false,
     fake: false,
@@ -203,7 +203,6 @@ function hydrateFilters(serialized: Partial<Filters>): Filters {
     muted: serialized.muted ?? d.muted,
     archived: serialized.archived ?? d.archived,
     inactiveDays: serialized.inactiveDays ?? d.inactiveDays,
-    neverPosted: serialized.neverPosted ?? d.neverPosted,
     members: serialized.members ?? d.members,
     scam: serialized.scam ?? d.scam,
     fake: serialized.fake ?? d.fake,
@@ -246,12 +245,11 @@ export function serializeManifest(p: Plan): string {
       archived: c.archived,
       pinned: c.pinned,
       unread: c.unread,
+      manuallyUnread: c.manuallyUnread,
       isScam: c.isScam,
       isFake: c.isFake,
       isVerified: c.isVerified,
       lastMessageAt: c.lastMessageAt,
-      // `undefined` (never searched) vanishes in JSON; `null` stays.
-      neverPosted: c.neverPosted,
       why: c.why,
     })),
   };
@@ -313,5 +311,14 @@ export function parseManifest(text: string): Plan {
       `manifest is malformed${where ? ` at "${where}"` : ""}: ${issue.message}`,
     );
   }
-  return { ...parsed.output, filters: hydrateFilters(parsed.output.filters) };
+  const plan = parsed.output;
+  // `manuallyUnread` is optional in the schema so a manifest written before the
+  // field existed still parses. Its default is `false` (Telegram's) and
+  // `PlanChat` declares it present, so it is filled in here rather than left
+  // `undefined` behind a type that promises otherwise.
+  return {
+    ...plan,
+    filters: hydrateFilters(plan.filters),
+    chats: plan.chats.map((chat) => ({ ...chat, manuallyUnread: chat.manuallyUnread ?? false })),
+  };
 }

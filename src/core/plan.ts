@@ -34,7 +34,6 @@ const NO_FILTERS: Filters = {
   muted: null,
   archived: null,
   inactiveDays: null,
-  neverPosted: false,
   members: null,
   scam: false,
   fake: false,

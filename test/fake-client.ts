@@ -26,7 +26,6 @@ export class FakeClient extends ShippedFakeClient {
   constructor(opts: FakeClientOptions = {}) {
     super({
       ...opts,
-      dialogs: opts.dialogs ?? fixtures.dialogs,
       rawDialogs: opts.rawDialogs ?? fixtures.rawDialogs,
     });
   }

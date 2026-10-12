@@ -8,7 +8,8 @@
  *   corrected mtcute facts (`dialog.peer`, `chat.chatType`, `chat.displayName`,
  *   `dialog.isMuted` possibly null, `chat.membersCount` possibly null,
  *   `dialog.lastMessage?.date` possibly absent) onto a `ChatRecord`. The opt-in
- *   `neverPosted` is deliberately left absent.
+ *   `chatType` outside the six the core knows is refused, and `manuallyUnread`
+ *   is read from the dialog because Telegram's unread badge needs it.
  * - It refuses what a `ChatRecord` cannot describe: a private chat has no
  *   `ChatType`, so it throws rather than inventing one, and `TelegramApi.dialogs`
  *   skips those before they reach it.
@@ -74,7 +75,7 @@ for (const raw of raws) {
  * The fixtures spell `lastMessageAt` without milliseconds; the seam emits
  * `Date#toISOString()`. Compare the instant, not the spelling.
  */
-function canonicalLastMessage(chat: Omit<ChatRecord, "neverPosted">): ChatRecord {
+function canonicalLastMessage(chat: ChatRecord): ChatRecord {
   return {
     ...chat,
     lastMessageAt: chat.lastMessageAt === null ? null : new Date(chat.lastMessageAt).toISOString(),
@@ -123,16 +124,14 @@ describe("normalizeDialog", () => {
 
   for (const { raw, expected } of mirrored) {
     test(`normalizes ${expected.id} (${expected.type}) to its dialogs.json record`, () => {
-      const { neverPosted: _neverPosted, ...want } = expected;
-      expect(normalizeDialog(asRawDialog(raw))).toEqual(canonicalLastMessage(want));
+      expect(normalizeDialog(asRawDialog(raw))).toEqual(canonicalLastMessage(expected));
     });
   }
 
-  test("neverPosted is left absent: it costs one request per chat", () => {
-    for (const raw of raws) {
-      if (peerOf(raw)["type"] !== "chat") continue;
-      expect(Object.hasOwn(normalizeDialog(asRawDialog(raw)), "neverPosted")).toBe(false);
-    }
+  test("manuallyUnread comes from the dialog, and defaults to false when absent", () => {
+    expect(normalizeDialog(asRawDialog(rawById(-1006))).manuallyUnread).toBe(true);
+    expect(normalizeDialog(asRawDialog(rawById(-1001))).manuallyUnread).toBe(false);
+    expect(normalizeDialog(asRawDialog(rawById(-2002))).manuallyUnread).toBe(false);
   });
 
   test("a chat with every optional property missing gets the documented defaults", () => {
@@ -146,6 +145,7 @@ describe("normalizeDialog", () => {
       archived: false,
       pinned: false,
       unread: 0,
+      manuallyUnread: false,
       isScam: false,
       isFake: false,
       isVerified: false,
@@ -216,6 +216,35 @@ describe("TelegramApi", () => {
     const rows = await collect(api.dialogs());
     expect(rows.map((row) => row.id)).toEqual([...chats.map((chat) => chat.id), -2002, -2003]);
     expect(client.yields).toBe(raws.length);
+  });
+
+  test("dialogs() asks for both folders, so archived chats reach the filter", async () => {
+    // The fake now models mtcute's `archived: "exclude"` default, so an archived
+    // fixture row only arrives if the wrapper asked for `keep`. Before that, the
+    // real client hid every archived dialog and `--archived` could never match.
+    const { api } = apiOver();
+    const ids = (await collect(api.dialogs())).map((row) => row.id);
+    expect(ids).toContain(-1002);
+    expect(ids).toContain(-1007);
+    expect(ids).toContain(-1012);
+  });
+
+  test("dialogs() sends only the archived flag: `limit` is its own cap, not the client's", async () => {
+    // A client that hands out users and bots would otherwise let `--limit` be
+    // spent on peers this method skips, so the parameter must not be forwarded.
+    const sent: unknown[] = [];
+    const seam: TelegramClientLike = {
+      async *iterDialogs(params?: unknown) {
+        sent.push(params);
+      },
+      async leaveChat() {},
+      async getMe() {
+        return { id: 1 };
+      },
+      async destroy() {},
+    };
+    await collect(new TelegramApi(seam).dialogs({ limit: 5 }));
+    expect(sent).toEqual([{ archived: "keep" }]);
   });
 
   test("dialogs({ limit }) stops iterating as soon as it has enough", async () => {

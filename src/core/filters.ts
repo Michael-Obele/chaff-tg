@@ -112,12 +112,6 @@ export function match(chat: ChatRecord, f: Filters, now: Date): Match {
     if (!inactive) ok = false;
   }
 
-  if (f.neverPosted) {
-    why.push("never-posted");
-    // Unknown (field absent or null) fails: the filter is opt-in and affirmative.
-    if (chat.neverPosted !== true) ok = false;
-  }
-
   if (f.members !== null) {
     why.push(`members:${f.members.min}-${f.members.max}`);
     // Missing counts are excluded, never treated as zero.
@@ -137,7 +131,12 @@ export function match(chat: ChatRecord, f: Filters, now: Date): Match {
 
   if (f.unread !== null) {
     why.push(f.unread ? "unread" : "read");
-    if (f.unread ? chat.unread === 0 : chat.unread > 0) ok = false;
+    // Telegram's own rule (mtcute `Dialog.isUnread`), not the raw count: a chat
+    // reads as unread when the account marked it unread, or when it holds more
+    // than one unread message. A single unread message never badges a dialog, so
+    // a plain `unread > 0` test reported chats Telegram shows as read.
+    const unread = chat.manuallyUnread || chat.unread > 1;
+    if (f.unread ? !unread : unread) ok = false;
   }
 
   if (f.pinned !== null) {

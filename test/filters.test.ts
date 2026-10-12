@@ -41,7 +41,6 @@ function filters(overrides: Partial<Filters> = {}): Filters {
     muted: null,
     archived: null,
     inactiveDays: null,
-    neverPosted: false,
     members: null,
     scam: false,
     fake: false,
@@ -325,29 +324,6 @@ const table: Row[] = [
     why: ["inactive:366d"],
   },
 
-  // neverPosted (opt-in field: true passes, false and null both fail)
-  {
-    name: "never-posted: true passes",
-    id: -1005,
-    filters: { neverPosted: true },
-    ok: true,
-    why: ["never-posted"],
-  },
-  {
-    name: "never-posted: false fails",
-    id: -1001,
-    filters: { neverPosted: true },
-    ok: false,
-    why: ["never-posted"],
-  },
-  {
-    name: "never-posted: unknown fails",
-    id: -1008,
-    filters: { neverPosted: true },
-    ok: false,
-    why: ["never-posted"],
-  },
-
   // members (missing counts are excluded, never treated as zero)
   {
     name: "members: inside the range passes",
@@ -396,30 +372,45 @@ const table: Row[] = [
   },
   { name: "fake: clean chat fails", id: -1003, filters: { fake: true }, ok: false, why: ["fake"] },
 
-  // unread (true = has unread, false = nothing unread)
+  // unread (Telegram's own rule: marked unread, or more than one unread
+  // message — a single unread message never badges a dialog)
   {
-    name: "unread: chats with unread pass",
+    name: "unread: three unread messages pass",
     id: -1003,
     filters: { unread: true },
     ok: true,
     why: ["unread"],
   },
   {
-    name: "unread: read chat fails",
-    id: -1013,
+    name: "unread: a marked chat with no unread messages passes",
+    id: -1006,
+    filters: { unread: true },
+    ok: true,
+    why: ["unread"],
+  },
+  {
+    name: "unread: exactly one unread message does not pass, as in Telegram",
+    id: -1014,
     filters: { unread: true },
     ok: false,
     why: ["unread"],
   },
   {
-    name: "read: nothing unread passes",
+    name: "read: a chat with no unread messages and no mark passes",
     id: -1013,
     filters: { unread: false },
     ok: true,
     why: ["read"],
   },
   {
-    name: "read: unread chat fails",
+    name: "read: a marked chat fails even with no unread messages",
+    id: -1006,
+    filters: { unread: false },
+    ok: false,
+    why: ["read"],
+  },
+  {
+    name: "read: a chat with three unread messages fails",
     id: -1003,
     filters: { unread: false },
     ok: false,
@@ -537,8 +528,10 @@ describe("fixture", () => {
     expect(dialogs.some((d) => d.members === null)).toBe(true);
     expect(dialogs.some((d) => d.lastMessageAt === null)).toBe(true);
     expect(dialogs.some((d) => d.title.includes("🚀"))).toBe(true);
-    expect(dialogs.some((d) => d.neverPosted === true)).toBe(true);
-    expect(dialogs.some((d) => d.neverPosted === false)).toBe(true);
+    // The mark and a single unread message are the two cases the old
+    // `unread > 0` rule got wrong, so both are in the fixture.
+    expect(dialogs.some((d) => d.manuallyUnread)).toBe(true);
+    expect(dialogs.some((d) => d.unread === 1 && !d.manuallyUnread)).toBe(true);
   });
 });
 

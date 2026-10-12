@@ -26,7 +26,7 @@ import { checklistItems } from "../src/cli/commands/leave";
 import { EXIT } from "../src/core/errors";
 import { Journal } from "../src/core/journal";
 import { buildPlan } from "../src/core/plan";
-import { loadFixtures } from "./fake-client";
+import type { ChatRecord } from "../src/core/types";
 
 /** The Task 2 fixtures, which `CHAFF_FIXTURE` points the fake client at. */
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -193,7 +193,12 @@ describe("runChecklist (scripted input)", () => {
 
 describe("checklistItems", () => {
   test("scam chats are pre-ticked; pinned chats are shown but never pre-ticked", async () => {
-    const { dialogs } = await loadFixtures(new URL("./fixtures/", import.meta.url));
+    // The expected-record fixture, not the raw one: `loadFixtures` carries only
+    // the raw dialogs the seam normalises now, and `checklistItems` is a pure
+    // function over a plan, so its input is the records themselves.
+    const dialogs = (await Bun.file(
+      new URL("./fixtures/dialogs.json", import.meta.url),
+    ).json()) as ChatRecord[];
     const plan = buildPlan(dialogs, emptyFilters(), { id: 1, username: "chaff_tester" }, NOW);
     const items = checklistItems(plan);
 

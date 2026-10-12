@@ -37,16 +37,18 @@ import { FakeClient, loadFixtures, parseFakeFailures } from "../fakes/client";
 import type { CommandContext } from "./index";
 
 /**
- * The clients a command can be handed: the real wrapper, or the shipped fake.
- * Both answer `dialogs()`, `me()`, `leave()` and `destroy()`, which is the
- * surface Tasks 11-14 use; `test/fake-client.ts` carries the library's own
- * method names as well, so the fake is also a drop-in for the seam itself.
+ * A connected client and the account it is authorized as.
+ *
+ * `api` is always the real {@link TelegramApi} wrapper, fake mode included: the
+ * fake supplies the client *underneath* it. Wrapping it here is what keeps the
+ * offline suite honest about the seam — when `CHAFF_FAKE` handed the fake
+ * straight to the commands, every CLI test exercised the fake's own copy of
+ * `dialogs()` and the real fetch parameters (both-folder `archived`, the
+ * `limit` that counts chats) went untested, so `--archived` could never match a
+ * live account while the suite stayed green.
  */
-export type ChaffClient = TelegramApi | FakeClient;
-
-/** A connected client and the account it is authorized as. */
 export interface OpenedClient {
-  api: ChaffClient;
+  api: TelegramApi;
   account: Account;
 }
 
@@ -117,7 +119,9 @@ export async function openClient(ctx: CommandContext): Promise<OpenedClient> {
       ...(fixture === undefined || fixture === "" ? {} : await loadFixtures(fixture)),
       failures: parseFakeFailures(env.CHAFF_FAKE_FAILURES ?? ""),
     });
-    return { api: fake, account: await fake.me() };
+    // Wrapped, not returned raw: see `OpenedClient.api`.
+    const api = new TelegramApi(fake);
+    return { api, account: await api.me() };
   }
 
   const { paths, config } = resolveLocalState(env);

@@ -137,8 +137,6 @@ export interface FakeFailure {
  * whatever {@link loadFixtures} was pointed at.
  */
 export interface FakeClientOptions {
-  /** The records `dialogs()` yields. Defaults to none. */
-  dialogs?: ChatRecord[];
   /** The raw dialogs `iterDialogs()` yields. Defaults to none. */
   rawDialogs?: unknown[];
   /** Scripted `leaveChat` failures, consumed as they are thrown. */
@@ -147,11 +145,9 @@ export interface FakeClientOptions {
   account?: Account;
 }
 
-/** The two fixture files a fake client is built from. */
+/** The fixture file a fake client is built from. */
 export interface FakeFixtures {
-  /** `dialogs.json`: the records `dialogs()` yields. */
-  dialogs: ChatRecord[];
-  /** `raw-dialogs.json`: the same chats as raw mtcute shapes. */
+  /** `raw-dialogs.json`: the chats as raw mtcute shapes (see {@link loadFixtures}). */
   rawDialogs: unknown[];
 }
 
@@ -167,7 +163,8 @@ export interface FakeFixtures {
 export async function loadFixtures(dir: string | URL): Promise<FakeFixtures> {
   const base = fixtureDir(dir);
   return {
-    dialogs: (await Bun.file(new URL("dialogs.json", base)).json()) as ChatRecord[],
+    // Only the raw shape: the records read out of it are the wrapper's job
+    // (`TelegramApi.dialogs`), which is the code the offline suite must exercise.
     rawDialogs: (await Bun.file(new URL("raw-dialogs.json", base)).json()) as unknown[],
   };
 }
@@ -198,13 +195,11 @@ export class FakeClient implements TelegramClientLike {
   /** Whether `destroy()` was called. */
   destroyed = false;
 
-  private readonly records: ChatRecord[];
   private readonly raws: unknown[];
   private readonly failures: FakeFailure[];
   private readonly account: Account;
 
   constructor(opts: FakeClientOptions = {}) {
-    this.records = opts.dialogs ?? [];
     this.raws = opts.rawDialogs ?? [];
     this.failures = [...(opts.failures ?? [])];
     this.account = opts.account ?? { id: 1, username: "chaff_tester" };
@@ -213,14 +208,26 @@ export class FakeClient implements TelegramClientLike {
   /**
    * Raw dialogs, in fixture order.
    *
-   * `params` is accepted and deliberately ignored: `limit` is
+   * `archived` is the one parameter honoured, because it is the one whose
+   * *default* changes what exists: mtcute's `iterDialogs` defaults to
+   * `archived: "exclude"` and returns the main folder only unless asked for
+   * both. A fake that ignored that would hand out archived rows the real
+   * client never yields, so the `--archived` filter could pass every offline
+   * test while never matching a live account. Modelling it here is what makes
+   * `test/normalize.test.ts` able to catch that regression.
+   *
+   * Everything else is accepted and deliberately ignored: `limit` is
    * `TelegramApi.dialogs`'s contract, and a cap here would shadow the wrapper's
    * own stop, leaving it untested. The fixture is small enough that the extra
    * requests do not matter.
    */
   async *iterDialogs(params?: unknown): AsyncIterableIterator<unknown> {
-    void params;
+    const archived =
+      (params as { archived?: "exclude" | "only" | "keep" } | undefined)?.archived ?? "exclude";
     for (const raw of this.raws) {
+      const isArchived = (raw as { isArchived?: unknown } | null)?.isArchived === true;
+      if (archived === "exclude" && isArchived) continue;
+      if (archived === "only" && !isArchived) continue;
       this.yields += 1;
       yield raw;
     }
@@ -248,17 +255,6 @@ export class FakeClient implements TelegramClientLike {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
-  }
-
-  /** The `TelegramApi`-shaped list, straight from the fixture. */
-  async *dialogs(opts: { limit?: number } = {}): AsyncIterable<ChatRecord> {
-    const limit = opts.limit ?? Number.POSITIVE_INFINITY;
-    let seen = 0;
-    for (const chat of this.records) {
-      if (seen >= limit) return;
-      seen += 1;
-      yield chat;
-    }
   }
 
   /** The `TelegramApi`-shaped leave. */

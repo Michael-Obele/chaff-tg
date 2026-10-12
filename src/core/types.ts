@@ -24,13 +24,21 @@ export interface ChatRecord {
   archived: boolean;
   pinned: boolean;
   unread: number;
+  /**
+   * Whether the account manually marked this chat unread (`Dialog.isManuallyUnread`).
+   *
+   * It sits beside the count because Telegram's own "unread" rule needs both: a
+   * dialog reads as unread when it is marked, or when it holds more than one
+   * unread message (mtcute `Dialog.isUnread`). A chat marked unread with a zero
+   * count is invisible to a `unread > 0` test, which is what `--unread` used to
+   * do before this field existed.
+   */
+  manuallyUnread: boolean;
   isScam: boolean;
   isFake: boolean;
   isVerified: boolean;
   /** ISO 8601 UTC; `null` for empty chats (never posted in). */
   lastMessageAt: string | null;
-  /** Opt-in field: whether the account holder has ever posted here. */
-  neverPosted?: boolean | null;
 }
 
 /**
@@ -55,7 +63,6 @@ export interface Filters {
   archived: boolean | null;
   /** Last message at least n days before `now`; `lastMessageAt: null` counts as inactive. */
   inactiveDays: number | null;
-  neverPosted: boolean;
   /** Inclusive range; chats with a missing count are excluded, not treated as zero. */
   members: { min: number; max: number } | null;
   scam: boolean;
@@ -116,7 +123,7 @@ export interface Match {
    * One stable, machine-readable token per active filter, in the fixed order
    * of the `Filters` fields: `type:channel`, `keyword:signal`, `any:vip`,
    * `not:airdrop`, `regex:^Rust`, `id:-1001`, `muted`/`unmuted`,
-   * `archived`/`unarchived`, `inactive:365d`, `never-posted`, `members:0-50`,
+   * `archived`/`unarchived`, `inactive:365d`, `members:0-50`,
    * `scam`, `fake`, `unread`/`read`, `pinned`/`unpinned` — plus `include` and
    * `exclude` from `filterRecords`. `ok` gives the direction of the verdict.
    */

@@ -46,7 +46,8 @@ import { applyExclude, buildPlan, estimateSeconds } from "../../core/plan";
 import type { ChatRecord, Plan, PlanChat } from "../../core/types";
 import type { Selection } from "../args";
 import { runChecklist, runConfirm, type ChecklistItem } from "../checklist";
-import { openClient, resolveLocalState, type ChaffClient, type OpenedClient } from "../client";
+import { openClient, resolveLocalState, type OpenedClient } from "../client";
+import { TelegramApi } from "../../core/telegram";
 import type { Command, CommandContext } from "../index";
 
 /** A thrown value as a sentence; the same shape `runCli` prints. */
@@ -72,7 +73,7 @@ const NO_CLIENT: LeaveClient = {
  * adapted to the wrapper's `leave` (both front ends talk to `TelegramApi` or
  * the shipped fake, never to mtcute).
  */
-function leaveClient(api: ChaffClient): LeaveClient {
+function leaveClient(api: TelegramApi): LeaveClient {
   return {
     leaveChat: (chatId, params) => api.leave(Number(chatId), params ?? {}),
   };

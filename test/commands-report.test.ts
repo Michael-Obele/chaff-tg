@@ -15,7 +15,7 @@ import { runCli, type CliContext } from "../src/cli/index";
 import { EXIT } from "../src/core/errors";
 import { filterRecords } from "../src/core/filters";
 import { parseManifest } from "../src/core/manifest";
-import { loadFixtures } from "../src/fakes/client";
+import type { ChatRecord } from "../src/core/types";
 
 /** The Task 2 fixtures, which `CHAFF_FIXTURE` points the fake client at. */
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -132,8 +132,8 @@ describe("chaff report", () => {
 
     // And the same `why` arrays the engine computes for those filters — the
     // tokens are the difference between a list you trust and one you re-check.
-    const fixtures = await loadFixtures(FIXTURES);
-    const rows = filterRecords(fixtures.dialogs, { ...emptyFilters(), muted: true }, NOW).filter(
+    const dialogs = (await Bun.file(join(FIXTURES, "dialogs.json")).json()) as ChatRecord[];
+    const rows = filterRecords(dialogs, { ...emptyFilters(), muted: true }, NOW).filter(
       (row) => row.ok,
     );
     expect(plan.chats.map((chat) => chat.why)).toEqual(rows.map((row) => row.why));
