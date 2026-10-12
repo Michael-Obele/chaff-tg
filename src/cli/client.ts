@@ -12,13 +12,13 @@
  *   optional `CHAFF_FIXTURE` points the fake at a directory holding
  *   `dialogs.json` and `raw-dialogs.json`; without it the fake has no dialogs,
  *   and `chaff list --json` prints `{ "chats": [] }` rather than failing.
- * - **Not being logged in is a sentence, not a stack trace.** No session, or a
- *   session with no credentials to open it, is `NotLoggedInError`: one plain
- *   sentence ending in what to do about it, and exit 3 (`EXIT.NOT_LOGGED_IN`,
- *   "Not logged in, or the session is unreadable"). Everything else that goes
- *   wrong while connecting stays what it is — a `ConfigError` for a config file
- *   that cannot be trusted, or the library's own error — and exits as the
- *   unexpected failure it is.
+ * - **Not being logged in is a sentence, not a stack trace.** No session, a
+ *   session with no credentials to open it, or a session file that exists but
+ *   cannot be opened are all `NotLoggedInError`: one plain sentence ending in
+ *   what to do about it, and exit 3 (`EXIT.NOT_LOGGED_IN`, "Not logged in, or
+ *   the session is unreadable"). A *network* failure while connecting is not an
+ *   unreadable session, so it stays the unexpected failure it is (exit 1), as
+ *   does a `ConfigError` for a config file that cannot be trusted.
  * - **The api hash is an argument, never a message.** It is read from the
  *   environment or the config file (`resolveCredentials`) and handed to
  *   `TelegramApi.connect`; nothing on this path ever formats a credential into
@@ -26,7 +26,7 @@
  *   (`plan/safety.md`, "Logging").
  */
 import { type Config, loadConfig, resolveCredentials } from "../core/config";
-import { EXIT } from "../core/errors";
+import { EXIT, classify } from "../core/errors";
 import { type Paths, resolvePaths, sessionExists } from "../core/session";
 import { TelegramApi } from "../core/telegram";
 import type { Account } from "../core/types";
@@ -135,10 +135,24 @@ export async function openClient(ctx: CommandContext): Promise<OpenedClient> {
     );
   }
 
-  const api = await TelegramApi.connect({
-    apiId: credentials.apiId,
-    apiHash: credentials.apiHash,
-    sessionPath,
-  });
+  // The session exists and its credentials resolve, so a failed connect is the
+  // other half of exit 3: "the session is unreadable". The one exception is a
+  // network failure, which is retryable and not about the session at all.
+  // ponytail: one classified check, no new error type — widen this if a
+  // non-network connect failure ever needs an exit code of its own.
+  let api: TelegramApi;
+  try {
+    api = await TelegramApi.connect({
+      apiId: credentials.apiId,
+      apiHash: credentials.apiHash,
+      sessionPath,
+    });
+  } catch (error) {
+    if (classify(error).kind === "network") throw error;
+    throw new NotLoggedInError(
+      `not logged in: the session file at ${sessionPath} exists but could not ` +
+        "be opened. Run `chaff login` again, or set CHAFF_FAKE=1 to work offline.",
+    );
+  }
   return { api, account: await api.me() };
 }

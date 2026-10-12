@@ -224,6 +224,31 @@ describe("chaff list", () => {
     expect(stderr.text().split("\n").filter(Boolean)).toHaveLength(1);
   });
 
+  test("a session file that exists but cannot be opened is exit 3, with no hash", async () => {
+    // The other half of "Not logged in, or the session is unreadable"
+    // (`plan/cli.md`, "Exit codes"): the file is there, so the missing-session
+    // branch does not fire, and the credentials resolve, so the
+    // missing-credentials branch does not either. What is left is a failure to
+    // open the file. It has to be a *file* — `sessionExists` requires
+    // `isFile()` — with contents that are not a database, so the failure is
+    // local and the suite stays offline.
+    const { env } = sandbox({ CHAFF_API_ID: "12345", CHAFF_API_HASH: API_HASH });
+    const sessionDir = join(env.XDG_DATA_HOME as string, "chaff-tg");
+    mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(sessionDir, "default.session"), "not a database\n".repeat(20), {
+      mode: 0o600,
+    });
+
+    const { code, stdout, stderr } = await run(["list"], env);
+
+    expect(code).toBe(EXIT.NOT_LOGGED_IN);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("could not be opened");
+    expect(stderr.text()).not.toContain(API_HASH);
+    expect(stderr.text()).not.toContain("at Object.");
+    expect(stderr.text().split("\n").filter(Boolean)).toHaveLength(1);
+  });
+
   test("the api hash never reaches stdout or stderr", async () => {
     const { env } = fakeEnv({ CHAFF_API_ID: "12345", CHAFF_API_HASH: API_HASH });
     const table = await run(["-v", "list"], env);
