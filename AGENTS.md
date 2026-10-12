@@ -23,11 +23,21 @@ Working agreement for anyone (human or agent) working on `chaff-tg`.
    `src/core/telegram.ts`. Everything else talks to our own types.
 4. **Destructive actions default to dry-run.** Anything that leaves or clears
    chats requires explicit confirmation; no flag combination may bypass it.
-5. **Bun APIs first, `node:fs` for what Bun leaves to it.** Reach for `Bun.file`,
-   `Bun.write`, `Bun.spawn`, `Bun.Glob` and `bun:sqlite` before their `node:`
-   equivalents. Three things stay on `node:fs` because Bun has no equivalent and
-   its own file I/O docs say to use `node:fs` for them: directories (`mkdir`,
-   `readdir`), file modes (`open(path, "a", 0o600)` for the 600 session and
-   config files), and synchronous reads (`loadConfig` is sync by design).
-   `Bun.write` creates a file `664` and takes no mode, and `BunFile.exists()` is
-   false for a directory, so neither can replace those.
+5. **Bun APIs first, `node:` only where Bun leaves no choice.** Reach for
+   `Bun.file`, `Bun.write`, `Bun.file().delete()`, `Bun.file().stat()`, `Bun.Glob`,
+   `Bun.spawn`, `Bun.env`, `bun:sqlite` and the global `prompt()` before their
+   `node:` equivalents. Bun's own boundary (`bun.com/docs/runtime/file-io`): the
+   `Bun.file`/`Bun.write` APIs "are heavily optimized and are the recommended way
+   to work with files in Bun", and for what they do not cover — "such as `mkdir`
+   or `readdir`" — "Bun's implementation of `node:fs` is fast. Use `node:fs` for
+   working with directories in Bun."
+
+   What still imports `node:`, each measured on Bun 1.4.0 rather than assumed:
+   directories (`mkdir`/`readdir`; no Bun API) · `existsSync` in `doctor.ts`
+   (`Bun.file().exists()` is `false` for a directory, and `.git` may be one) ·
+   creating a file _with_ a mode (`Bun.write` makes a `664` file and takes no mode;
+   _reading_ one is `(await Bun.file(p).stat()).mode`) · `writeFileSync` in
+   `output.ts` (the sink is sync by design, and `Bun.write` is async-only) ·
+   `readFileSync` in `config.ts` (`loadConfig` is sync by design) · `node:path` and
+   `node:os` (no Bun surface of their own) · `node:readline` in the checklist and
+   `logout` (no Bun equivalent; single-line prompts use `prompt()`).

@@ -474,6 +474,10 @@ field, independent of the binary.
 
 - **`not logged in` (exit 3).** Run `chaff login`. If you only want to try the commands,
   `CHAFF_FAKE=1` runs them offline against the fake client.
+- **`this session is not signed in, and there is no terminal to sign in on` (exit 1).** The
+  session file exists but was never signed in, and stdin is not a terminal, so `chaff`
+  refuses to ask for a phone number and a code it could never receive. Run `chaff login` in
+  a terminal, where the prompts work.
 - **`no api id and api hash are configured` (exit 3).** Set `CHAFF_API_ID` and
   `CHAFF_API_HASH`, or put them in `~/.config/chaff-tg/config.json`.
 - **`my.telegram.org` answers with a bare "ERROR" instead of creating the app.** Telegram
