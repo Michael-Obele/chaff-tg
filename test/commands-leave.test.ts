@@ -428,6 +428,34 @@ describe("chaff leave", () => {
     expect(stderr.text()).not.toContain("left");
   });
 
+  test("a machine format with no explicit set refuses: exit 2, nothing left", async () => {
+    // `--json` cannot host the checklist or the typed confirmation, and with
+    // neither `--select` nor `--from` there is nothing else to choose the set
+    // from -- quietly acting on the whole plan would be the worst outcome, so
+    // the combination is refused before the journal exists.
+    const { env } = fakeEnv();
+    const { code, stdout, stderr } = await run(
+      ["leave", "--muted", "--yes", "--json", "--delay", "0"],
+      env,
+    );
+
+    expect(code).toBe(EXIT.USAGE);
+    expect(stderr.text()).toContain("machine output format");
+    expect(stderr.text()).not.toContain("left ");
+  });
+
+  test("--select stays scriptable under a machine format", async () => {
+    // The refusal is narrow on purpose: naming the set explicitly under
+    // `--json` is the documented scripting path and has to keep working.
+    const { env } = fakeEnv();
+    const { code } = await run(
+      ["leave", "--select", "-1005", "--yes", "--json", "--delay", "0"],
+      env,
+    );
+
+    expect(code).not.toBe(EXIT.USAGE);
+  });
+
   test("the api hash reaches neither stream nor the journal", async () => {
     const hash = "fedcba9876543210fedcba9876543210";
     const { env, root } = fakeEnv({

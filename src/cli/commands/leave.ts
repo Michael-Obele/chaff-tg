@@ -191,6 +191,23 @@ export const leaveCommand: Command = {
         return EXIT.OK;
       }
 
+      // A machine output format cannot host the checklist or the typed
+      // confirmation, and the filters-only path has nothing else to choose the
+      // set from -- falling through would quietly act on every matching chat.
+      // So the combination is a usage error, refused before the journal exists
+      // and before anything else can happen. `--select` and `--from` name an
+      // explicit set, so they stay scriptable under any format.
+      const machine = ctx.args.flags.json || ctx.args.flags.csv || ctx.args.flags.md;
+      if (machine && selection.select === null && selection.from === null) {
+        ctx.out.error(
+          "a machine output format (--json, --csv or --md) cannot ask which " +
+            "chats to leave. Name the set with --select <ids>, replay a reviewed " +
+            "manifest with --from <file>, or drop the format flag to use the " +
+            "checklist.\n",
+        );
+        return EXIT.USAGE;
+      }
+
       // Live. The journal is not optional: a leave with no record is not
       // acceptable, so a journal that cannot be opened refuses the run.
       const { paths, config } = resolveLocalState(ctx.env);
