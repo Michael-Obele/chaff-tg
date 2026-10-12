@@ -1,0 +1,94 @@
+name: CI
+
+# The gates every commit has to pass, plus the smoke test that is the only
+# defence against a runtime regression breaking every shipped binary
+# (plan/distribution.md, "Bun version floor"). Bun is pinned to an exact
+# version on purpose: the compiled binary embeds the runtime, so "latest" is
+# how a release ships a different runtime than the one that was tested.
+#
+# `smoke-compile` is not an optional extra. It compiles the host target, copies
+# the binary somewhere with no `node_modules` anywhere near it, and runs it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.0"
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      # `bun run test` is `bun test` plus scripts/check-tests.ts, which fails
+      # the run when it discovers zero test files: a green suite that ran
+      # nothing is worse than no suite (plan/notes.md).
+      - run: bun run test
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+
+  smoke-compile:
+    name: smoke-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/build.ts --target bun-linux-x64
+      - name: run the binary with no node_modules in sight
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          cp dist/chaff-bun-linux-x64 "$work/chaff"
+          cd "$work"
+
+          # The version is stamped in by the build, so "dev" means the define
+          # never reached the binary.
+          version=$(./chaff --version)
+          echo "$version"
+          case "$version" in
+            *dev*) echo "the build did not stamp a version" >&2; exit 1 ;;
+          esac
+
+          # The fake client is the only way a compiled binary can be exercised
+          # with no Telegram account and no network.
+          CHAFF_FAKE=1 ./chaff list --json > list.json
+          grep -q '"chats"' list.json
+          echo "smoke-compile passed"

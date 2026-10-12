@@ -8,8 +8,18 @@ plan/
 *.session-wal
 *.session.json
 
+# The app credentials are a secret too: `.env` holds the api hash, and a copy of
+# the config (which `chaff login` writes to ~/.config/chaff-tg/) must not land in
+# a commit either. The template is the one exception.
+.env
+.env.*
+!.env.example
+/config.json
+
 # Build and dependency output
 dist/
+# Release staging: the artifacts the release job collects before upload
+.chaff-release/
 node_modules/
 *.tsbuildinfo
 

@@ -1,0 +1,135 @@
+name: Release
+
+# Tagging vX.Y.Z publishes the eight binaries, `checksums.txt` and
+# `install.sh` (plan/distribution.md, "CI"). Nothing here runs on a branch: a
+# release is a deliberate act, and `release-smoke` re-downloads the published
+# artifact over the same public URL a user's `install.sh` would use.
+#
+# `release` is idempotent so a failed `release-smoke` can be re-run with the
+# upload fixed, rather than needing a new tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  BUN_VERSION: "1.4.0"
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      # One job rather than three: the three commands take seconds each, and
+      # three runners to run them is three checkout-and-install cycles for
+      # nothing. CI runs the same three as separate jobs for faster feedback.
+      - name: test
+        run: bun run test
+      - name: typecheck
+        run: bun run typecheck
+      - name: format
+        run: bun run format:check
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: gates
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken target must not hide the state of the other seven.
+      fail-fast: false
+      matrix:
+        target:
+          - bun-linux-x64
+          - bun-linux-arm64
+          - bun-linux-x64-musl
+          - bun-linux-arm64-musl
+          - bun-darwin-x64
+          - bun-darwin-arm64
+          - bun-windows-x64
+          - bun-windows-arm64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # Every target cross-compiles from this runner; Bun fetches each
+      # platform's runtime. When `src/tui` starts importing `@opentui/core`,
+      # this install also needs `--os="*" --cpu="*"`, because that library
+      # ships one native package per platform and Bun can only embed the ones
+      # that are present (plan/distribution.md, "Build script"). Nothing
+      # imports it today, so the plain install is enough and much smaller.
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/build.ts --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chaff-${{ matrix.target }}
+          path: dist/chaff-*
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: .chaff-release
+          merge-multiple: true
+      # The checksums describe exactly the bytes that were uploaded, so they
+      # are written here rather than in a build job that never saw the others.
+      - name: write checksums.txt
+        run: sh scripts/checksums.sh .chaff-release
+      - name: create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" .chaff-release/* install.sh --clobber
+          else
+            gh release create "$tag" .chaff-release/* install.sh \
+              --title "chaff-tg $tag" --generate-notes
+          fi
+
+  release-smoke:
+    name: release-smoke
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      # Deliberately no checkout: this job is a user. It downloads the
+      # published artifact over the public URL, verifies it against the
+      # published checksums, and runs it in an empty directory.
+      - name: download and run the published Linux x64 artifact
+        run: |
+          set -eu
+          tag="$GITHUB_REF_NAME"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+
+          work=$(mktemp -d)
+          cd "$work"
+
+          curl -fsSL "$base/checksums.txt" -o checksums.txt
+          curl -fsSL "$base/chaff-bun-linux-x64" -o chaff
+
+          expected=$(awk '$2 == "chaff-bun-linux-x64" { print $1 }' checksums.txt)
+          actual=$(sha256sum chaff | awk '{ print $1 }')
+          if [ "$expected" != "$actual" ]; then
+            echo "checksum mismatch: expected $expected, got $actual" >&2
+            exit 1
+          fi
+
+          chmod 755 chaff
+          ./chaff --version
+          CHAFF_FAKE=1 ./chaff list --json > list.json
+          grep -q '"chats"' list.json
+          echo "release-smoke passed for $tag"
