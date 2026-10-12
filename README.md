@@ -461,13 +461,14 @@ flood and skip paths can be tested without Telegram.
 | `.github/`     | CI, and the release workflow that publishes on a tag.                                                                      |
 | `install.sh`   | The release installer: detects the platform, verifies sha256, installs to `~/.local/bin`.                                  |
 | `.env.example` | The template for `.env`, which holds your app credentials.                                                                 |
-| `docs/`        | The banner.                                                                                                                |
+| `docs/`        | The banner and the [command reference](docs/commands.md).                                                                  |
 
 ## Status
 
-Built and working: the core library, eight commands (`login`, `whoami`, `list`, `report`,
-`leave`, `journal`, `doctor`, `logout`), the review manifest, the resumable journal, the
-filter set, and the flood rules. 507 tests pass with no network and no account.
+Built and working: the core library, nine commands (`login`, `whoami`, `list`, `check`,
+`report`, `leave`, `journal`, `doctor`, `logout`), the review manifest, the resumable
+journal, the filter set, and the flood rules. 528 tests pass with no network and no
+account.
 
 Not done yet, and not pretended otherwise: `chaff tui`, where the command prints a note
 instead of opening the full-screen OpenTUI interface.
@@ -477,6 +478,12 @@ The packaging is written and shipped: `scripts/build.ts` compiles all eight targ
 `.github/workflows/release.yml` publishes on a `v*` tag. The first release, `v0.1.0`,
 shipped all eight binaries, so the seven targets other than Linux x64 are real release
 builds and not a local promise.
+
+The published release is `v0.1.1`. This tree is `0.2.0`: it adds `chaff check` and the
+`--banned` and `--unavailable` filters, and it removes `--never-posted`, which could never
+match a real account. Archived chats are now listed rather than silently hidden, so a bare
+`chaff list` shows more than it did in `v0.1.1`. Check any saved manifest with
+`chaff check --from` before replaying it.
 
 This is `0.x` until the filter set stops changing. The manifest has its own `version`
 field, independent of the binary.
