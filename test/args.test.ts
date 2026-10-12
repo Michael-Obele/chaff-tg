@@ -9,6 +9,7 @@ import {
   CLI_COMMIT,
   CLI_VERSION,
   COMMANDS,
+  promptable,
   runCli,
   versionLine,
   type CliContext,
@@ -502,6 +503,26 @@ describe("src/cli hygiene", () => {
       .filter((file) => /from\s+"\.\.\/(cli|tui)\//.test(file.text))
       .map((file) => file.path);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("promptable", () => {
+  const tty = { isTTY: true };
+  const pipe = { isTTY: false };
+
+  test("both ends have to be terminals", () => {
+    expect(promptable(tty, tty)).toBe(true);
+    // The case that used to hang: stdout was a terminal, so the old stdout-only
+    // check said "ask", and the question went out to a stdin that could never
+    // answer it.
+    expect(promptable(tty, pipe)).toBe(false);
+    expect(promptable(pipe, tty)).toBe(false);
+    expect(promptable(pipe, pipe)).toBe(false);
+  });
+
+  test("a stream that does not say is not a terminal", () => {
+    expect(promptable(undefined, undefined)).toBe(false);
+    expect(promptable({}, tty)).toBe(false);
   });
 });
 

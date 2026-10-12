@@ -150,6 +150,10 @@ export async function openClient(ctx: CommandContext): Promise<OpenedClient> {
       apiId: credentials.apiId,
       apiHash: credentials.apiHash,
       sessionPath,
+      // Never `true`: a command is not a login. An unauthorized session is a "not
+      // logged in" for the user to fix, not a prompt to answer mid-run — and with
+      // no terminal attached it would be a prompt nobody could ever answer.
+      interactive: false,
     });
   } catch (error) {
     if (classify(error).kind === "network") throw error;

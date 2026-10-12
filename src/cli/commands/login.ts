@@ -1,32 +1,26 @@
 /**
- * `chaff login`: prompts for api id, api hash, phone, then the code; stores
- * the session with mode 600, directory 700; `--json` prints the session path
- * and the account. It also records what it resolved in
+ * `chaff login`: takes the api id and api hash from the environment, or asks for
+ * them when there is a terminal to ask, records them in
  * `~/.config/chaff-tg/config.json` (mode 600 inside the 700 config directory),
- * from the prompt or from the environment: a `.env` is only found in the
- * directory a command runs in, and the installed binary is meant to run
- * anywhere. Under `CHAFF_FAKE=1` it writes a marker file instead of calling
- * mtcute, so CI can exercise the flow offline.
+ * then connects so the session is created mode 600, directory 700. `--json`
+ * prints the session path and the account.
+ *
+ * The credentials are recorded because a `.env` is only found in the directory a
+ * command runs in, and the installed binary is meant to run anywhere.
+ *
+ * The phone number and the code are NOT asked for here: mtcute's Bun client
+ * prompts for both, and `connect` is told whether a terminal is attached
+ * (`interactive`, src/core/telegram.ts). Under `CHAFF_FAKE=1` this writes a
+ * marker file instead of calling mtcute, so CI can exercise the flow offline.
  */
 import { open } from "node:fs/promises";
 import { dirname } from "node:path";
-import { createInterface } from "node:readline";
 import { writeConfigCredentials } from "../../core/config";
 import { EXIT } from "../../core/errors";
 import { ensureSecureDir } from "../../core/session";
 import { fakeRequested, resolveLocalState } from "../client";
 import type { Command } from "../index";
 import { factsTable } from "../render/facts";
-
-async function ask(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 export const loginCommand: Command = {
   name: "login",
@@ -57,17 +51,19 @@ export const loginCommand: Command = {
 
     let apiIdStr = env.CHAFF_API_ID?.trim() ?? "";
     let apiHash = env.CHAFF_API_HASH?.trim() ?? "";
+
+    // `ctx.isTTY` means "both ends are terminals" (`promptable`,
+    // src/cli/index.ts), which is what `prompt()` needs: it writes the question to
+    // stdout and reads the answer from stdin.
+    const canAsk = ctx.isTTY;
+
     if (!apiIdStr || !apiHash) {
-      if (!ctx.isTTY) {
+      if (!canAsk) {
         ctx.out.error("not logged in: set CHAFF_API_ID and CHAFF_API_HASH or run in a TTY\n");
         return EXIT.NOT_LOGGED_IN;
       }
-      apiIdStr = await ask("api id: ");
-      apiHash = await ask("api hash: ");
-      const phone = await ask("phone (e.g. +1234567890): ");
-      void phone;
-      const code = await ask("code: ");
-      void code;
+      apiIdStr = (prompt("api id: ") ?? "").trim();
+      apiHash = (prompt("api hash: ") ?? "").trim();
     }
 
     const apiId = Number.parseInt(apiIdStr, 10);
@@ -91,30 +87,27 @@ export const loginCommand: Command = {
     const handle = await open(sessionPath, "a", 0o600);
     await handle.close();
 
-    const account = { id: 1, username: null as string | null };
-    try {
-      const { TelegramApi } = await import("../../core/telegram");
-      const api = await TelegramApi.connect({ apiId, apiHash, sessionPath });
-      const me = await api.me();
-      await api.destroy();
-      ctx.out.document({
-        json: { session: sessionPath, account: me },
-        table: factsTable([
-          ["session", sessionPath],
-          ["id", String(me.id)],
-          ["username", me.username ?? "-"],
-        ]),
-      });
-    } catch {
-      ctx.out.document({
-        json: { session: sessionPath, account },
-        table: factsTable([
-          ["session", sessionPath],
-          ["id", String(account.id)],
-          ["username", account.username ?? "-"],
-        ]),
-      });
-    }
+    // No `catch` around this. Swallowing the failure reported an account that
+    // does not exist (`id 1`) and exited 0, so a login that never happened looked
+    // exactly like one that did. `runCli` already turns a thrown error into its
+    // message on stderr and a real exit code, which is the honest answer.
+    const { TelegramApi } = await import("../../core/telegram");
+    const api = await TelegramApi.connect({
+      apiId,
+      apiHash,
+      sessionPath,
+      interactive: canAsk,
+    });
+    const me = await api.me();
+    await api.destroy();
+    ctx.out.document({
+      json: { session: sessionPath, account: me },
+      table: factsTable([
+        ["session", sessionPath],
+        ["id", String(me.id)],
+        ["username", me.username ?? "-"],
+      ]),
+    });
     return EXIT.OK;
   },
 };

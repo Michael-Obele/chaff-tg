@@ -57,6 +57,16 @@ export interface ClientOptions {
   apiHash: string;
   /** Where mtcute's SQLite storage keeps the account (`Paths.sessionPath`). */
   sessionPath: string;
+  /**
+   * Whether mtcute may ask the terminal for a phone number, a code and a 2fa
+   * password when the session turns out not to be signed in.
+   *
+   * `chaff login` at a terminal says yes — signing in is the point of that
+   * command. Everything else says no: a command in the middle of a run must
+   * never stop and wait for a human, and a caller with no terminal would wait
+   * forever for an answer that can never arrive.
+   */
+  interactive: boolean;
 }
 
 /**
@@ -68,12 +78,23 @@ export interface ClientOptions {
  * `removeSession` already knows to look for them
  * (plan/architecture.md, "Session and journal").
  *
- * `start()` is the connect step. On a live session it returns immediately:
- * mtcute's `start` calls `getMe` first and only falls through to the login
- * flow when the session is not authorized — and even then it throws
- * `MtArgumentError` rather than prompting, because we pass no phone or bot
- * token (`@mtcute/core/highlevel/methods/auth/start.js`). Deciding that there
- * is no session at all is the CLI's job.
+ * `start()` is the connect step. On a signed-in session it returns immediately:
+ * mtcute's `start` calls `getMe` first, and only falls through to the sign-in
+ * flow when the session is not authorized.
+ *
+ * That fall-through is where the prompts live, and they are NOT `@mtcute/core`'s:
+ * core's own `start` throws rather than asking
+ * (`@mtcute/core/highlevel/methods/auth/start.js`), but `@mtcute/bun`'s client
+ * installs terminal prompts for the phone, the code and the 2fa password
+ * whenever they are missing (`@mtcute/bun/client.js`, `start`), so core never
+ * sees one missing. Measured on chaff-tg itself: `chaff login < /dev/null` sat at
+ * a `phone > ` prompt until it was killed, because that prompt reads a stdin that
+ * had already ended.
+ *
+ * So whether anyone may be asked is {@link ClientOptions.interactive}, a decision
+ * this module is handed rather than one it makes: the CLI knows whether a
+ * terminal is attached, and the core may not read `process.stdin`. Non-interactive
+ * callers get {@link refuseSignIn}, which turns the silent wait into a sentence.
  *
  * This function never reads `CHAFF_FAKE`: choosing the fake client belongs to
  * the CLI layer (implementation-plan.md, Task 11).
@@ -85,11 +106,40 @@ export async function createClient(opts: ClientOptions): Promise<TelegramClientL
     storage: opts.sessionPath,
   });
 
-  await client.start({});
+  try {
+    await client.start(
+      // These three are exactly what the Bun client would otherwise fill in with a
+      // prompt, so when nobody may be asked the sign-in fails instead of waiting.
+      opts.interactive ? {} : { phone: refuseSignIn, code: refuseSignIn, password: refuseSignIn },
+    );
+  } catch (error) {
+    // The client owns sockets and a SQLite handle, and this function is what
+    // created it, so a failed connect has to close it here too. Left open it holds
+    // the event loop, and the process prints the failure and then never exits
+    // (measured: `timeout` reported 124 with the message already on stderr).
+    await client.destroy().catch(() => {});
+    throw error;
+  }
 
   // The return statement is the structural check: this line stops compiling
   // the moment mtcute's surface drifts away from the seam.
   return client;
+}
+
+/**
+ * Refuse a sign-in that would have to ask a terminal.
+ *
+ * This is what a non-interactive caller passes as the phone, the code and the 2fa
+ * password (see {@link createClient}). It returns `never`, which is assignable to
+ * each provider's return type, so one function stands in for all three — and the
+ * throw becomes a sentence the command can report, instead of a prompt that never
+ * returns.
+ */
+function refuseSignIn(): never {
+  throw new Error(
+    "this session is not signed in, and there is no terminal to sign in on: " +
+      "run `chaff login` in a terminal, or set CHAFF_FAKE=1 to work offline",
+  );
 }
 
 /**

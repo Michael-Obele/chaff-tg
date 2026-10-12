@@ -184,6 +184,16 @@ describe("chaff login records the credentials it resolved", () => {
   });
 });
 
+describe("chaff login refuses to ask when it cannot", () => {
+  test("no credentials and no terminal: exit 3, naming the variables to set", async () => {
+    const { env } = sandbox();
+    const login = await run(["login"], env);
+    expect(login.code).toBe(EXIT.NOT_LOGGED_IN);
+    expect(login.stderr.text()).toContain("CHAFF_API_ID");
+    expect(login.stderr.text()).toContain("CHAFF_API_HASH");
+  });
+});
+
 describe("chaff logout", () => {
   test("logout --yes removes the session, its -wal/-shm siblings, and the journal; second logout reports nothing and exits 0", async () => {
     const { env, root } = fakeEnv();

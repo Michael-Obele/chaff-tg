@@ -5,7 +5,6 @@
  * Confirmation uses the same injectable-input approach as `src/cli/checklist.ts`
  * so it is testable without a TTY.
  */
-import { unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { EXIT } from "../../core/errors";
 import { removeSession, sessionExists } from "../../core/session";
@@ -30,7 +29,7 @@ async function confirm(
     rl.close();
     return false;
   }
-  if (isTTY && process.stdin.isTTY) {
+  if (isTTY) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     return new Promise((resolve) => {
       rl.question(question, (answer) => {
@@ -54,14 +53,9 @@ export const logoutCommand: Command = {
     const journalPath = paths.journalPath();
 
     const hasSession = await sessionExists(paths, sessionName);
-    let hasJournal = false;
-    try {
-      const { stat } = await import("node:fs/promises");
-      await stat(journalPath);
-      hasJournal = true;
-    } catch {
-      hasJournal = false;
-    }
+    // `Bun.file().exists()` answers for a file, and the journal is one. It says
+    // `false` for a directory, which is why `doctor`'s `.git` probe cannot use it.
+    const hasJournal = await Bun.file(journalPath).exists();
 
     if (!hasSession && !hasJournal) {
       ctx.out.note("nothing to remove\n");
@@ -88,14 +82,15 @@ export const logoutCommand: Command = {
     if (hasSession) removedSession = await removeSession(paths, sessionName);
     if (hasJournal) {
       try {
-        await unlink(journalPath);
+        // The same ENOENT `unlink` throws, so the one forgiven failure stands.
+        await Bun.file(journalPath).delete();
         removedJournal = true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
       for (const suffix of ["-wal", "-shm", "-journal"]) {
         try {
-          await unlink(`${journalPath}${suffix}`);
+          await Bun.file(`${journalPath}${suffix}`).delete();
         } catch {
           // ignore
         }

@@ -79,7 +79,12 @@ export interface CliContext {
   stderr: Writer;
   /** The clock, so a command never reads the system time itself. */
   now(): Date;
-  /** Whether stdout is a terminal, which decides prompts and the checklist. */
+  /**
+   * Whether a prompt can be asked *and* answered: both `stdout` and `stdin` are
+   * terminals. Every prompt in the CLI hangs off this one flag — the credentials,
+   * the confirmation, the checklist — so no command has to consult
+   * `process.stdin` itself (see `promptable`, below).
+   */
   isTTY: boolean;
 }
 
@@ -100,7 +105,12 @@ export interface CommandContext {
   readonly env: Record<string, string | undefined>;
   /** The clock, so a command never reads the system time itself. */
   now(): Date;
-  /** Whether stdout is a terminal, which decides prompts and the checklist. */
+  /**
+   * Whether a prompt can be asked *and* answered: both `stdout` and `stdin` are
+   * terminals. Every prompt in the CLI hangs off this one flag — the credentials,
+   * the confirmation, the checklist — so no command has to consult
+   * `process.stdin` itself (see `promptable`, below).
+   */
   readonly isTTY: boolean;
 }
 
@@ -225,6 +235,21 @@ export async function runCli(
   }
 }
 
+/**
+ * Whether a prompt can be asked *and* answered.
+ *
+ * Both ends have to be terminals: the question is written to `stdout`, and the
+ * answer is read from `stdin`. Checking only `stdout` is how `chaff login` came to
+ * sit at mtcute's `phone > ` prompt with stdin redirected — the question went out
+ * and the answer could never arrive. A function over two unknowns rather than a
+ * pair of reads at the call site, so all four combinations are a unit test.
+ */
+export function promptable(stdout: unknown, stdin: unknown): boolean {
+  const isTty = (stream: unknown): boolean =>
+    (stream as { isTTY?: unknown } | null | undefined)?.isTTY === true;
+  return isTty(stdout) && isTty(stdin);
+}
+
 /** The real process, wired into the injected context. Used by the wrapper only. */
 function processContext(): CliContext {
   return {
@@ -233,7 +258,7 @@ function processContext(): CliContext {
     stdout: process.stdout,
     stderr: process.stderr,
     now: () => new Date(),
-    isTTY: process.stdout.isTTY === true,
+    isTTY: promptable(process.stdout, process.stdin),
   };
 }
 
