@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pkg from "../package.json";
 import { EXIT } from "../src/core/errors";
 import { DEFAULT_CONFIG } from "../src/core/index";
 import type { Filters } from "../src/core/types";
@@ -290,8 +291,12 @@ describe("runCli: dispatch, version, help, and stubs", () => {
     expect(versionLine()).toBe(`chaff ${CLI_VERSION} (${CLI_COMMIT})\n`);
   });
 
-  test("the build defines are absent here, so both default to dev", () => {
-    expect(CLI_VERSION).toBe("dev");
+  test("with no build defines, the version comes from package.json and the commit is dev", () => {
+    // This is what a from-source run reports (`bun run src/cli/index.ts`, and what a
+    // `bun link`ed `chaff` reports): the real version, so a bug report quoting it names
+    // something recognisable, and `dev` for the commit, because nothing stamped one.
+    // A compiled binary gets both from `scripts/build.ts` instead.
+    expect(CLI_VERSION).toBe(pkg.version);
     expect(CLI_COMMIT).toBe("dev");
   });
 

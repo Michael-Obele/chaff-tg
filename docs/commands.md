@@ -9,6 +9,7 @@
 ## Contents
 
 - [How to read this page](#how-to-read-this-page)
+  - [General options](#general-options)
 - [Before the first command](#before-the-first-command)
 - [Commands](#commands)
   - [login](#login)
@@ -47,6 +48,20 @@ flags. You filter once, the same way, everywhere. Filters combine with AND.
 
 **Comments in examples** are written after `#` only where a line needs explaining. Copy
 the command, not the comment.
+
+### General options
+
+These work on every command, before or after the command word.
+
+| Option          | Effect                                                                                                                                                                                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-h, --help`    | Print the usage text and exit `0`. The version of the usage text is always the one this build actually accepts.                                                                                                                    |
+| `-V, --version` | Print `chaff <version> (<commit>)` and exit `0`. A from-source run prints the version from `package.json` and the commit `dev`; a released binary prints the version of the tag it shipped under and the commit it was built from. |
+| `--dry-run`     | Rehearse. This is the default for `leave`; the flag is a way of saying so out loud.                                                                                                                                                |
+| `--run <id>`    | Only `journal` reads this: show the per-chat states of one run.                                                                                                                                                                    |
+
+There is one version number in the project, `package.json`, and the git tag has to match
+it: the release workflow refuses to build when the two disagree.
 
 ## Before the first command
 

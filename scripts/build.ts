@@ -13,14 +13,12 @@
  *   bun scripts/build.ts                              # all eight, the release matrix
  *   bun scripts/build.ts --target bun-linux-x64       # one target, e.g. the host
  *   bun scripts/build.ts --outdir /tmp/chaff-out      # somewhere else
- *   bun scripts/build.ts --version 0.2.0              # what the release workflow passes
  *
- * The version comes from `package.json`, unless `--version` says otherwise. The release
- * workflow passes the tag, because the tag is the release's own statement of what it is:
- * a binary built from `v0.3.0` must report `0.3.0`, whatever `package.json` happens to
- * say at that moment (plan/distribution.md, "Versioning"). `src/core/index.ts` carries
- * the same number for the CLI run from source, and `test/smoke.test.ts` fails when the
- * two disagree.
+ * The version comes from `package.json` and nowhere else, which is why this script has no
+ * `--version` flag: two ways to set one number is one way too many. The release workflow
+ * refuses to build unless the git tag and `package.json` agree (its `gates` job), so the
+ * eight published binaries report exactly the tag they were released under
+ * (plan/distribution.md, "Versioning").
  *
  * The other seven targets are exercised in CI, not by hand: each cross target
  * makes Bun download that platform's runtime (tens of MB each), so a local
@@ -57,8 +55,6 @@ type Target = (typeof TARGETS)[number];
 interface Options {
   targets: Target[];
   outdir: string;
-  /** `--version`: the version to stamp, already normalized. `null` means "read package.json". */
-  version: string | null;
   help: boolean;
 }
 
@@ -67,35 +63,21 @@ const USAGE = `Usage: bun scripts/build.ts [options]
 Options:
   --target <name>   Build one target (repeatable). Default: all eight.
   --outdir <dir>    Where the binaries go. Default: dist
-  --version <v>     Version to stamp. Default: the one in package.json.
   --list            Print the target names and exit.
   -h, --help        Show this help.
 
+The version stamped in is package.json's, and the release workflow checks it against the
+Git tag before it builds anything.
+
 Targets: ${TARGETS.join(", ")}
 `;
-
-/**
- * `v1.2.3` and `1.2.3` both mean `1.2.3`; anything else is a usage error.
- *
- * The tag is allowed to arrive with its `v` because that is how the workflow has it, and
- * silently stamping `v0.2.0` into a binary that prints `chaff v0.2.0` would look like a
- * second spelling of the same version. A malformed value is refused rather than stamped:
- * the number is printed in bug reports, so a typo here outlives the release.
- */
-function normalizeVersion(value: string): string {
-  const trimmed = value.trim().replace(/^v/, "");
-  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(trimmed)) {
-    throw new UsageError(`${JSON.stringify(value)} is not a version such as 1.2.3 or v1.2.3`);
-  }
-  return trimmed;
-}
 
 /** A usage error: the message is the whole diagnosis, and the exit code is 2. */
 class UsageError extends Error {}
 
 /** Parse the command line. Unknown flags and targets are usage errors (exit 2). */
 function parseArgs(argv: readonly string[]): Options {
-  const options: Options = { targets: [], outdir: "dist", version: null, help: false };
+  const options: Options = { targets: [], outdir: "dist", help: false };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -123,12 +105,6 @@ function parseArgs(argv: readonly string[]): Options {
         options.outdir = value;
         break;
       }
-      case "--version": {
-        const value = argv[++i];
-        if (value === undefined) throw new UsageError("--version needs a version such as 1.2.3");
-        options.version = normalizeVersion(value);
-        break;
-      }
       default:
         throw new UsageError(`unknown argument ${JSON.stringify(arg ?? "")}`);
     }
@@ -142,14 +118,13 @@ function isTarget(value: string): value is Target {
 }
 
 /**
- * The version stamped into the binary.
+ * The version stamped into the binary: `package.json`'s, the one place it is written down.
  *
- * `--version` wins, because at release time the tag is the authority and `package.json` is
- * only a file someone may have forgotten to bump. With no flag, `package.json` decides, so
- * a local build still reports something a person can recognise.
+ * The release workflow's `gates` job refuses to run when the git tag and this number
+ * disagree, so a released binary reports its own tag without this script having to be told
+ * what that is.
  */
-async function resolveVersion(explicit: string | null): Promise<string> {
-  if (explicit !== null) return explicit;
+async function readVersion(): Promise<string> {
   const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as { version?: unknown };
   return typeof pkg.version === "string" && pkg.version !== "" ? pkg.version : "0.0.0";
 }
@@ -241,17 +216,11 @@ async function main(): Promise<void> {
 
   const targets: readonly Target[] = options.targets.length > 0 ? options.targets : TARGETS;
   const outdir = resolve(ROOT, options.outdir);
-  const version = await resolveVersion(options.version);
+  const version = await readVersion();
   const commit = readCommit();
 
   mkdirSync(outdir, { recursive: true });
-  // Name the source: "version 0.2.0" alone leaves a reader guessing whether the
-  // release workflow stamped the tag or nobody bumped package.json.
-  console.log(
-    `chaff-tg build: version ${version} from ` +
-      `${options.version === null ? "package.json" : "--version"}, ` +
-      `commit ${commit}, ${targets.length} target(s)`,
-  );
+  console.log(`chaff-tg build: version ${version}, commit ${commit}, ${targets.length} target(s)`);
 
   const built: Built[] = [];
   const failed: Target[] = [];

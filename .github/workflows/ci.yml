@@ -79,12 +79,18 @@ jobs:
           cp dist/chaff-bun-linux-x64 "$work/chaff"
           cd "$work"
 
-          # The version is stamped in by the build, so "dev" means the define
-          # never reached the binary.
+          # The version is stamped in by the build from package.json, so the binary has to
+          # report exactly that. Asserting equality rather than "not dev" is the stronger
+          # check: it also catches the build failing to resolve the file at all.
+          expected=$(jq -r .version "$GITHUB_WORKSPACE/package.json")
           version=$(./chaff --version)
           echo "$version"
           case "$version" in
-            *dev*) echo "the build did not stamp a version" >&2; exit 1 ;;
+            "chaff $expected ("*) ;;
+            *)
+              echo "the binary reports '$version', not 'chaff $expected'" >&2
+              exit 1
+              ;;
           esac
 
           # The fake client is the only way a compiled binary can be exercised

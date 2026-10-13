@@ -4,10 +4,10 @@
  * Pure domain logic. The core never imports from `src/cli` or `src/tui`,
  * and it never prints to stdout/stderr. Both front ends depend on this
  * package — never the reverse.
+ *
+ * No version lives here: `package.json` is the one place a version is written
+ * down, and the CLI reads it (src/cli/index.ts).
  */
-
-/** Keep in sync with `package.json` "version"; asserted by test/smoke.test.ts. */
-export const VERSION = "0.2.0";
 
 //
 // The plan surface: the plan builder and the types it produces. The filter

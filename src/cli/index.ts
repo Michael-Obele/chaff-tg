@@ -45,20 +45,33 @@ import { tuiCommand } from "./commands/tui";
 import { whoamiCommand } from "./commands/whoami";
 import { bindOutput, type CommandOutput } from "./output";
 import { renderUsage, type CommandBrief } from "./usage";
+// `package.json` is the one place the version is written down (plan/distribution.md,
+// "Versioning"). Bun inlines the import, so a compiled binary carries it too, and no
+// file in this repo repeats the number.
+import pkg from "../../package.json";
 
 /**
  * The version and commit the build stamped in (`scripts/build.ts` defines
  * `CHAFF_VERSION` and `CHAFF_COMMIT`). Both are `typeof`-guarded because
  * `bun run src/cli/index.ts` has no build step and the identifiers are simply
- * not there; `dev` is the honest answer for a from-source run.
+ * not there.
  */
 declare const CHAFF_VERSION: string | undefined;
 declare const CHAFF_COMMIT: string | undefined;
 
-/** The version this build reports. */
-export const CLI_VERSION: string = typeof CHAFF_VERSION === "undefined" ? "dev" : CHAFF_VERSION;
+/**
+ * The version this build reports: the stamped one when there is one (a compiled
+ * binary), otherwise `package.json`'s. A from-source run therefore reports the real
+ * version too, which is what `bun link` users see, and there is no "dev" to mistake
+ * for a version.
+ */
+export const CLI_VERSION: string =
+  typeof CHAFF_VERSION === "undefined" ? pkg.version : CHAFF_VERSION;
 
-/** The commit this build came from. */
+/**
+ * The commit this build came from, or `dev` when nothing stamped one: `dev` is the
+ * honest answer for a run straight out of the working tree.
+ */
 export const CLI_COMMIT: string = typeof CHAFF_COMMIT === "undefined" ? "dev" : CHAFF_COMMIT;
 
 /** `chaff <version> (<commit>)`, which is what `--version` prints. */

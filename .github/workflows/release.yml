@@ -8,11 +8,13 @@ name: Release
 # `release` is idempotent so a failed `release-smoke` can be re-run with the
 # upload fixed, rather than needing a new tag.
 #
-# THE TAG IS THE VERSION. `v0.2.0` is what the binaries report, because the build
-# job passes `--version "${GITHUB_REF_NAME#v}"` to scripts/build.ts, and the gates
-# job refuses to build at all unless the tag and `package.json` agree. That one
-# rule is what stops a release from shipping binaries whose `--version` names a
-# build nobody can find.
+# ONE VERSION, ONE PLACE. The version lives in `package.json` and nowhere else, in this
+# repo or in the build: `scripts/build.ts` reads that file, and the CLI reads it too, so a
+# from-source run and a released binary report the same number. The `gates` job below
+# refuses to build when the git tag and `package.json` disagree, which is what makes the
+# tag trustworthy; `release-smoke` then asserts the published binary reports it. There is
+# deliberately no `--version` flag on the build script: two ways to set one number is one
+# way too many.
 #
 # WHICH COMMIT MESSAGE BUMPS WHAT. Conventional Commits, and the strongest prefix
 # in the release window wins:
@@ -28,8 +30,7 @@ name: Release
 #
 # THE RELEASE DANCE, in order:
 #
-#   1. bump `package.json` and `src/core/index.ts` together (they carry the same
-#      number, and `bun run test` fails when they disagree)
+#   1. bump the version in `package.json` (the only place it is written down)
 #   2. commit as `chore(release): 0.2.0`
 #   3. `git tag v0.2.0`
 #   4. push the branch, then push the tag. Pushing the tag is the only step that
@@ -43,8 +44,17 @@ on:
   push:
     tags: ["v*"]
 
+# One release per tag. Two runs of the same tag would race on `gh release upload`, and
+# cancelling a half-finished release is worse than letting it finish, so this waits.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Read-only by default. The one job that writes is `release`, which says so itself: a
+# workflow that can push to the repository because a build step asked it to is a
+# permission nobody audited.
 permissions:
-  contents: write
+  contents: read
 
 env:
   BUN_VERSION: "1.4.0"
@@ -54,21 +64,28 @@ jobs:
     name: gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      # Version agreement first, because it is the cheapest failure and the one
-      # that would be discovered last otherwise: a mismatch here means the eight
-      # released binaries would all report a version the tag does not claim.
-      - name: the tag matches package.json
+      # The whole point of the tag, checked before anything expensive runs: the eight
+      # binaries this tag publishes are stamped with `package.json`'s version, so a tag
+      # that disagrees with it would ship a release whose `--version` names something
+      # nobody can find. Cheapest failure first, and the last one anyone would notice.
+      - name: the tag matches package.json, and both are semver
         run: |
           set -eu
           tag_version="${GITHUB_REF_NAME#v}"
           pkg_version=$(jq -r .version package.json)
+          semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! printf '%s' "$tag_version" | grep -Eq "$semver"; then
+            echo "tag $GITHUB_REF_NAME is not semver; tag vX.Y.Z" >&2
+            exit 1
+          fi
           if [ "$tag_version" != "$pkg_version" ]; then
             echo "tag $GITHUB_REF_NAME does not match package.json version $pkg_version" >&2
-            echo "bump package.json and src/core/index.ts, commit, delete the tag, re-tag" >&2
+            echo "bump package.json, commit to main, then move the tag:" >&2
+            echo "  git push --delete origin $GITHUB_REF_NAME && git tag -d $GITHUB_REF_NAME" >&2
             exit 1
           fi
           echo "tag $GITHUB_REF_NAME matches package.json $pkg_version"
@@ -101,7 +118,7 @@ jobs:
           - bun-windows-x64
           - bun-windows-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -112,15 +129,14 @@ jobs:
       # that are present (plan/distribution.md, "Build script"). Nothing
       # imports it today, so the plain install is enough and much smaller.
       - run: bun install --frozen-lockfile
-      # The tag is the version (see the note at the top of this file), so the build
-      # stamps it. The commit is passed in rather than read from git: this is the commit
-      # the tag points at, and it is what `chaff --version` prints beside the version.
+      # The version needs no passing: `scripts/build.ts` reads `package.json`, which the
+      # `gates` job has already proved matches the tag. The commit is passed in rather
+      # than read from git, because CI shallow-clones and `github.sha` is the honest
+      # answer: it is the commit this tag points at, and what `chaff --version` prints.
       - name: build ${{ matrix.target }}
         env:
           CHAFF_COMMIT: ${{ github.sha }}
-        run: |
-          set -eu
-          bun scripts/build.ts --target ${{ matrix.target }} --version "${GITHUB_REF_NAME#v}"
+        run: bun scripts/build.ts --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v7
         with:
           name: chaff-${{ matrix.target }}
@@ -131,6 +147,9 @@ jobs:
     name: release
     needs: build
     runs-on: ubuntu-latest
+    # The one job that writes to the repository (see `permissions` at the top).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
