@@ -241,6 +241,12 @@ export const groupsCommand: Command = {
         );
       }
       case "set": {
+        if (rest.length > 1) {
+          ctx.out.error(
+            `groups set takes exactly one argument (the group name), got ${JSON.stringify(rest[1])}\n`,
+          );
+          return EXIT.USAGE;
+        }
         const built = fragmentFromArgs(ctx);
         if (typeof built === "string") {
           ctx.out.error(`${built}\n`);

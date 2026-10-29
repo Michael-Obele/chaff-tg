@@ -385,4 +385,23 @@ describe("chaff groups (arity)", () => {
     expect(result.stderr.text()).toContain("groups unset junk needs at least one word");
     expect(readFileSync(path, "utf8")).toBe(before);
   });
+
+  test("set with an extra token is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "set", "junk", "extra", "--scam"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups set takes exactly one");
+    expect(result.stderr.text()).toContain("extra");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("add with an empty list is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({});
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "add", "junk", ""], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups add junk needs at least one word");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
 });
