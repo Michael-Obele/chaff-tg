@@ -244,6 +244,17 @@ describe("mergeGroups", () => {
     expect(mergeGroups(same, ["a", "b"], unset(), provided()).inactiveDays).toBe(30);
   });
 
+  test("two groups that agree on a members range are not a disagreement", () => {
+    const pair = {
+      a: { members: { min: 10, max: 100 } },
+      b: { members: { min: 10, max: 100 } },
+    };
+    expect(mergeGroups(pair, ["a", "b"], unset(), provided()).members).toEqual({
+      min: 10,
+      max: 100,
+    });
+  });
+
   test("a boolean left false by a second group does not conflict", () => {
     const pair = { a: { scam: true }, b: { scam: false } };
     expect(mergeGroups(pair, ["a", "b"], unset(), provided()).scam).toBe(true);
@@ -285,6 +296,13 @@ describe("mutations", () => {
     });
   });
 
+  test("removeWords refuses a name that is not there", () => {
+    expect(() => removeWords({}, "typosome", ["word"])).toThrow(/no group named "typosome"/);
+    expect(() => removeWords({ deals: { keyword: ["amazon"] } }, "typosome", ["word"])).toThrow(
+      /no group named "typosome"/,
+    );
+  });
+
   test("setFields replaces only the fields given", () => {
     const next = setFields({ deals: { keyword: ["amazon"], scam: true } }, "deals", {
       keyword: ["voucher"],
@@ -298,11 +316,29 @@ describe("mutations", () => {
     );
   });
 
+  test("setFields refuses an empty fragment", () => {
+    expect(() => setFields({}, "deals", {})).toThrow(/needs at least one filter flag/);
+    expect(() => setFields({}, "deals", { keyword: [], scam: false })).toThrow(
+      /needs at least one filter flag/,
+    );
+  });
+
   test("unsetFields drops named keys and refuses a name that is not a field", () => {
     expect(unsetFields({ deals: { keyword: ["amazon"], scam: true } }, "deals", ["scam"])).toEqual({
       deals: { keyword: ["amazon"] },
     });
-    expect(() => unsetFields({}, "deals", ["scams"])).toThrow(/unknown field/);
+    expect(() => unsetFields({ deals: { keyword: ["amazon"] } }, "deals", ["scams"])).toThrow(
+      /unknown field/,
+    );
+  });
+
+  test("unsetFields refuses a name that is not there", () => {
+    expect(() => unsetFields({}, "typosome", ["scam"])).toThrow(/no group named "typosome"/);
+  });
+
+  test("remove and unset report a bad name before a missing group", () => {
+    expect(() => removeWords({}, "bad name", ["x"])).toThrow(/not usable/);
+    expect(() => unsetFields({}, "bad name", ["scam"])).toThrow(/not usable/);
   });
 
   test("dropGroup deletes the name and refuses a typo", () => {

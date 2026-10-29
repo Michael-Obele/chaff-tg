@@ -464,6 +464,7 @@ export function addWords(groups: Groups, name: string, words: readonly string[])
  */
 export function removeWords(groups: Groups, name: string, words: readonly string[]): Groups {
   checkGroupName(name);
+  if (!(name in groups)) throw new GroupsError("unknown-group", unknownName(groups, name));
   const drop = new Set(words.map((word) => word.toLowerCase()));
   const keyword = (fragmentOf(groups, name).keyword ?? []).filter(
     (word) => !drop.has(word.toLowerCase()),
@@ -493,6 +494,7 @@ export function setFields(groups: Groups, name: string, fragment: GroupFilter): 
 /** Remove named fields from a group. */
 export function unsetFields(groups: Groups, name: string, keys: readonly string[]): Groups {
   checkGroupName(name);
+  if (!(name in groups)) throw new GroupsError("unknown-group", unknownName(groups, name));
   const next = { ...fragmentOf(groups, name) } as FilterBag;
   for (const key of keys) {
     if (!(GROUP_KEYS as readonly string[]).includes(key)) {
