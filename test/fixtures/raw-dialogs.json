@@ -28,7 +28,15 @@
       "membersCount": 15000,
       "isScam": false,
       "isFake": false,
-      "isVerified": true
+      "isVerified": true,
+      "isRestricted": true,
+      "restrictions": [
+        {
+          "platform": "all",
+          "reason": "copyright",
+          "text": "This channel is unavailable due to copyright infringement."
+        }
+      ]
     },
     "isMuted": true,
     "isArchived": true,

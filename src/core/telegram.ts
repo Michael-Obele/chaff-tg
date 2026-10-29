@@ -67,6 +67,21 @@ export interface ChatCheck {
   status: ChatStatus;
   /** `null` when the chat is gone; there is nothing left to name. */
   title: string | null;
+  /**
+   * Whether Telegram marks the chat restricted (`Chat.isRestricted`). A
+   * restricted chat is usually still `ok`: Telegram answers for it, and shows
+   * the content to be withheld.
+   */
+  restricted: boolean;
+  /**
+   * The restriction reasons, comma joined and deduped, or `null`. This is the
+   * only place the "why is this blocked" question has an answer at all: a
+   * forbidden peer carries no reason in this TL layer
+   * (`RawChannelForbidden` in @mtcute/core/tl is id, access hash, title and
+   * untilDate), so `banned` cannot say copyright, spam or anything else
+   * (plan/groups.md, "Blocked channels and `chaff check`").
+   */
+  restriction: string | null;
 }
 
 /**
@@ -94,7 +109,34 @@ function verdictOf(id: number, chat: RawObject): ChatCheck {
         : "ok";
   // The same two spellings `normalizeDialog` accepts: `displayName` is the
   // library's alias for the raw title.
-  return { id, status, title: asString(chat["displayName"]) ?? asString(chat["title"]) };
+  return {
+    id,
+    status,
+    title: asString(chat["displayName"]) ?? asString(chat["title"]),
+    restricted: asBoolean(chat["isRestricted"]) ?? false,
+    restriction: restrictionTextOf(chat),
+  };
+}
+
+/**
+ * The restriction reasons of a chat, as one field.
+ *
+ * `Chat.restrictions` is an array of `{ platform, reason, text }`, present only
+ * when the chat is restricted. The machine `reason` is what a script and a
+ * filter want; `text` is the sentence for the user, and is deliberately not
+ * folded in here: a column that sometimes holds prose and sometimes a token is
+ * a column nobody can read off. When there is no usable reason the answer is
+ * `null`, not an empty string.
+ */
+export function restrictionTextOf(chat: RawObject): string | null {
+  const list = chat["restrictions"];
+  if (!Array.isArray(list)) return null;
+  const reasons: string[] = [];
+  for (const item of list) {
+    const reason = asString(asObject(item)?.["reason"]);
+    if (reason !== null && reason !== "" && !reasons.includes(reason)) reasons.push(reason);
+  }
+  return reasons.length === 0 ? null : reasons.join(",");
 }
 
 /** Credentials and the stored session a real client needs. */
@@ -281,10 +323,14 @@ export class TelegramApi {
     for (const id of ids) {
       try {
         const chat = asObject(await this.client.getChat(id));
-        out.push(chat === null ? { id, status: "gone", title: null } : verdictOf(id, chat));
+        out.push(
+          chat === null
+            ? { id, status: "gone", title: null, restricted: false, restriction: null }
+            : verdictOf(id, chat),
+        );
       } catch (error) {
         if (!isUnresolvable(error)) throw error;
-        out.push({ id, status: "gone", title: null });
+        out.push({ id, status: "gone", title: null, restricted: false, restriction: null });
       }
     }
     return out;

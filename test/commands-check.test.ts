@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { emptyFilters } from "../src/cli/args";
 import { EXIT } from "../src/core/errors";
 import { serializeManifest } from "../src/core/manifest";
+import { restrictionTextOf } from "../src/core/telegram";
 import type { ChatRecord, Plan } from "../src/core/types";
 import { FIXTURES, fakeEnv, run } from "./harness";
 
@@ -37,6 +38,8 @@ interface CheckRow {
   id: number;
   status: string;
   title: string | null;
+  restricted: boolean;
+  restriction: string | null;
 }
 
 /** The rows a `check --json` run printed, with the exit code that came with them. */
@@ -96,9 +99,15 @@ describe("chaff check", () => {
 
     expect(code).toBe(EXIT.OK);
     expect(rows).toEqual([
-      { id: -1001, status: "ok", title: "Signal Room" },
-      { id: -1016, status: "banned", title: "Forbidden Vault" },
-      { id: -9999, status: "gone", title: null },
+      { id: -1001, status: "ok", title: "Signal Room", restricted: false, restriction: null },
+      {
+        id: -1016,
+        status: "banned",
+        title: "Forbidden Vault",
+        restricted: false,
+        restriction: null,
+      },
+      { id: -9999, status: "gone", title: null, restricted: false, restriction: null },
     ]);
   });
 
@@ -156,5 +165,50 @@ describe("chaff check", () => {
     );
     expect(stdout.text()).not.toContain(API_HASH);
     expect(stderr.text()).not.toContain(API_HASH);
+  });
+});
+
+describe("restricted chats", () => {
+  test("check reports the restriction reason the peer carries", async () => {
+    const { code, rows } = await checked(["--id", "-1002"]);
+    expect(code).toBe(EXIT.OK);
+    expect(rows[0]).toMatchObject({
+      id: -1002,
+      restricted: true,
+      restriction: "copyright",
+    });
+  });
+
+  test("an unrestricted chat says so and carries no reason", async () => {
+    const { code, rows } = await checked(["--id", "-1001"]);
+    expect(code).toBe(EXIT.OK);
+    expect(rows[0]).toMatchObject({ id: -1001, restricted: false, restriction: null });
+  });
+
+  test("the table prints the reason beside the verdict", async () => {
+    const { stdout } = await run(["check", "--id", "-1002"], env());
+    expect(stdout.text()).toContain("copyright");
+  });
+
+  test("two reasons are joined once, in the order Telegram gave them", () => {
+    const chat = {
+      isBanned: false,
+      isLikelyUnavailable: false,
+      displayName: "X",
+      isRestricted: true,
+      restrictions: [{ reason: "copyright" }, { reason: "porno" }, { reason: "copyright" }],
+    };
+    expect(restrictionTextOf(chat)).toBe("copyright,porno");
+  });
+
+  test("a restriction with no usable reason is not a reason", () => {
+    const chat = {
+      isBanned: false,
+      isLikelyUnavailable: false,
+      displayName: "X",
+      isRestricted: true,
+      restrictions: [{ text: "This channel is unavailable." }],
+    };
+    expect(restrictionTextOf(chat)).toBeNull();
   });
 });

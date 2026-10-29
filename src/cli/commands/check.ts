@@ -44,6 +44,18 @@ const CHECK_COLUMNS: ReadonlyArray<Column<ChatCheck>> = [
   { key: "id", header: "id", align: "right", value: (row) => String(row.id) },
   { key: "status", header: "status", value: (row) => row.status },
   { key: "title", header: "title", value: (row) => row.title ?? "-", json: (row) => row.title },
+  {
+    key: "restricted",
+    header: "restricted",
+    value: (row) => String(row.restricted),
+    json: (row) => row.restricted,
+  },
+  {
+    key: "restriction",
+    header: "restriction",
+    value: (row) => row.restriction ?? "-",
+    json: (row) => row.restriction,
+  },
 ];
 
 /** The four statuses, in the order they are counted in the summary line. */
@@ -54,7 +66,12 @@ function summaryOf(rows: readonly ChatCheck[]): string {
   const counts = STATUSES.map(
     (status) => `${rows.filter((row) => row.status === status).length} ${status}`,
   );
-  return `Checked ${rows.length} chat${rows.length === 1 ? "" : "s"}: ${counts.join(", ")}\n`;
+  const restricted = rows.filter((row) => row.restricted).length;
+  return (
+    `Checked ${rows.length} chat${rows.length === 1 ? "" : "s"}: ${counts.join(", ")}` +
+    (restricted > 0 ? `, ${restricted} restricted` : "") +
+    "\n"
+  );
 }
 
 export const checkCommand: Command = {
