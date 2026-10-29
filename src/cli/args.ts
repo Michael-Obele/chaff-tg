@@ -196,11 +196,12 @@ const CHAT_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * How many bare tokens each command accepts after its own name. `groups` takes a
- * verb and a name; the flags a verb may need follow it as flags. Nothing else
+ * verb, a name and, for the verbs that need one, a list; the flags a verb may
+ * need follow it as flags. Nothing else
  * takes any, which keeps `chaff list foo` a usage error rather than a silently
  * ignored word.
  */
-const POSITIONALS: Readonly<Record<string, number>> = { groups: 2 };
+const POSITIONALS: Readonly<Record<string, number>> = { groups: 3 };
 
 /**
  * What `--type group` means: the whole group family, not the legacy spelling.

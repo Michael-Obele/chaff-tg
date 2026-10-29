@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { EXIT } from "../src/core/errors";
 import { type Groups, loadGroups, saveGroups } from "../src/core/groups";
 import { resolvePaths } from "../src/core/session";
@@ -176,5 +176,149 @@ describe("chaff groups (read)", () => {
     roots.push(root);
     const result = await run(["groups"], env);
     expect(result.code).toBe(EXIT.OK);
+  });
+});
+
+describe("chaff groups (write)", () => {
+  test("add creates the file and the group", async () => {
+    const { root, env } = fakeEnv();
+    roots.push(root);
+    const path = resolvePaths(env).groupsPath();
+    const added = await run(["groups", "add", "deals", "amazon,voucher"], env);
+    expect(added.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({ deals: { keyword: ["amazon", "voucher"] } });
+    expect(added.stdout.text()).toContain("keyword:amazon|voucher");
+  });
+
+  test("add unions into an existing group and keeps its other fields", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"], scam: true } });
+    const result = await run(["groups", "add", "deals", "amazon,voucher"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({ deals: { keyword: ["amazon", "voucher"], scam: true } });
+  });
+
+  test("add twice changes nothing the second time", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    await run(["groups", "add", "deals", "amazon"], env);
+    expect(loadGroups(path)).toEqual({ deals: { keyword: ["amazon"] } });
+  });
+
+  test("remove drops words and ignores words that are not there", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon", "voucher"] } });
+    const result = await run(["groups", "remove", "deals", "voucher,ghost"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({ deals: { keyword: ["amazon"] } });
+  });
+
+  test("set writes the flags typed and leaves the other fields alone", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    const result = await run(["groups", "set", "deals", "--scam", "--inactive-days", "365"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({
+      deals: { keyword: ["amazon"], scam: true, inactiveDays: 365 },
+    });
+  });
+
+  test("set replaces a field it is given twice", async () => {
+    const { env, path } = withGroups({ deals: { inactiveDays: 30 } });
+    await run(["groups", "set", "deals", "--inactive-days", "365"], env);
+    expect(loadGroups(path)).toEqual({ deals: { inactiveDays: 365 } });
+  });
+
+  test("set with no flags is refused", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "set", "deals"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("at least one filter flag");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("unset removes named fields", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"], scam: true } });
+    const result = await run(["groups", "unset", "deals", "scam"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({ deals: { keyword: ["amazon"] } });
+  });
+
+  test("unset of a field a group cannot hold is exit 2", async () => {
+    const { env } = withGroups({ deals: { keyword: ["amazon"] } });
+    const result = await run(["groups", "unset", "deals", "exclude"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("unknown field");
+  });
+
+  test("drop deletes the group and leaves the others", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] }, betting: { scam: true } });
+    const result = await run(["groups", "drop", "deals"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(loadGroups(path)).toEqual({ betting: { scam: true } });
+    expect(result.stdout.text()).toContain("dropped deals");
+  });
+
+  test("drop of a name that is not there is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "drop", "nope"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("a name that cannot be typed back is exit 2", async () => {
+    const { env } = withGroups({});
+    const result = await run(["groups", "add", "not a name", "amazon"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("not usable");
+  });
+
+  test("add without a word list is exit 2", async () => {
+    const { env } = withGroups({});
+    const result = await run(["groups", "add", "deals"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("needs a comma separated list");
+  });
+
+  test("a broken file is refused before anything is written", async () => {
+    const { root, env } = fakeEnv();
+    roots.push(root);
+    const path = resolvePaths(env).groupsPath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{ not json");
+    const result = await run(["groups", "add", "deals", "amazon"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("is not valid JSON");
+    expect(readFileSync(path, "utf8")).toBe("{ not json");
+  });
+
+  test("what a write saved is what --group uses", async () => {
+    const { env } = withGroups({});
+    const added = await run(["groups", "add", "junk", "signal,airdrop"], env);
+    expect(added.code).toBe(EXIT.OK);
+    const set = await run(["groups", "set", "junk", "--type", "channel"], env);
+    expect(set.code).toBe(EXIT.OK);
+    const viaGroup = await run(["list", "--group", "junk", "--json"], env);
+    const typed = await run(
+      ["list", "--keyword", "signal,airdrop", "--type", "channel", "--json"],
+      env,
+    );
+    expect(viaGroup.stdout.text()).toBe(typed.stdout.text());
+  });
+
+  test("remove of a name that is not there is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "remove", "typo", "x"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("no group named");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("unset of a name that is not there is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ deals: { keyword: ["amazon"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "unset", "typo", "scam"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("no group named");
+    expect(readFileSync(path, "utf8")).toBe(before);
   });
 });

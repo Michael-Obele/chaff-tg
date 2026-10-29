@@ -675,9 +675,9 @@ describe("positionals", () => {
     );
   });
 
-  test("groups refuses a third token by name and number", () => {
-    expect(() => parseArgs(["groups", "add", "deals", "extra"])).toThrow(
-      /groups takes at most 2 words/,
+  test("groups refuses a fourth token by name and number", () => {
+    expect(() => parseArgs(["groups", "add", "deals", "extra", "more"])).toThrow(
+      /groups takes at most 3 words/,
     );
   });
 });

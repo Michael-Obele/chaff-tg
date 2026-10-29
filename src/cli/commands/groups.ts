@@ -11,8 +11,22 @@
  * `--group` will actually use.
  */
 import { EXIT } from "../../core/errors";
-import { GROUP_KEYS, type GroupFilter, type Groups, loadGroups } from "../../core/groups";
+import {
+  addWords,
+  dropGroup,
+  GROUP_KEYS,
+  type GroupFilter,
+  type Groups,
+  GroupsError,
+  loadGroups,
+  removeWords,
+  saveGroups,
+  setFields,
+  unsetFields,
+} from "../../core/groups";
 import { resolvePaths } from "../../core/session";
+import { words } from "../args";
+import { fragmentFromArgs } from "../groups";
 import type { Command, CommandContext } from "../index";
 import type { Column, Table } from "../render/columns";
 import { factsTable } from "../render/facts";
@@ -29,7 +43,7 @@ interface GroupRow {
  * a thing nobody needs to read twice. `members` is the one object field and gets
  * its range spelling.
  */
-function describeFilter(fragment: GroupFilter): string {
+export function describeFilter(fragment: GroupFilter): string {
   const parts: string[] = [];
   for (const key of GROUP_KEYS) {
     const value = fragment[key];
@@ -104,13 +118,62 @@ function renderOne(ctx: CommandContext, name: string, fragment: GroupFilter): nu
   return EXIT.OK;
 }
 
+/**
+ * Run a mutation and write the result, or refuse without writing.
+ *
+ * The order is the point: `loadGroups` has already run in `run` (a broken file
+ * is refused before anything is written), the mutation is pure and may throw
+ * (`checkGroupName` on a bad name, `dropGroup` on a missing one), and
+ * `saveGroups` happens only once it has returned. Every `GroupsError` becomes
+ * exit 2 here, in one place, and the file is left exactly as it was.
+ */
+function guarded(ctx: CommandContext, path: string, change: () => Groups, message: string): number {
+  let next: Groups;
+  try {
+    next = change();
+  } catch (error) {
+    if (error instanceof GroupsError) {
+      ctx.out.error(`${error.message}\n`);
+      return EXIT.USAGE;
+    }
+    throw error;
+  }
+  saveGroups(path, next);
+  ctx.out.note(message);
+  return EXIT.OK;
+}
+
+/** The name and optional list a write verb was given, or a refusal. */
+function parseWrite(
+  ctx: CommandContext,
+  verb: string,
+  rest: string[],
+  needsList: boolean,
+): { name: string; list: string } | null {
+  const [name, list] = rest;
+  if (name === undefined) {
+    ctx.out.error(
+      needsList
+        ? `groups ${verb} needs a group name and a comma separated list\n`
+        : `groups ${verb} needs a group name\n`,
+    );
+    return null;
+  }
+  if (needsList && list === undefined) {
+    ctx.out.error(`groups ${verb} ${name} needs a comma separated list\n`);
+    return null;
+  }
+  return { name, list: list ?? "" };
+}
+
 export const groupsCommand: Command = {
   name: "groups",
   summary: "List, edit and reuse your saved filter groups",
 
   async run(ctx) {
     const [verb, ...rest] = ctx.args.positional;
-    const groups = loadGroups(resolvePaths(ctx.env).groupsPath());
+    const path = resolvePaths(ctx.env).groupsPath();
+    const groups = loadGroups(path);
 
     switch (verb ?? "list") {
       case "list":
@@ -127,6 +190,70 @@ export const groupsCommand: Command = {
           return EXIT.USAGE;
         }
         return renderOne(ctx, name, fragment);
+      }
+      case "add": {
+        const parsed = parseWrite(ctx, "add", rest, true);
+        if (parsed === null) return EXIT.USAGE;
+        const list = words(parsed.list);
+        if (list.length === 0) {
+          ctx.out.error(`groups add ${parsed.name} needs at least one word\n`);
+          return EXIT.USAGE;
+        }
+        return guarded(
+          ctx,
+          path,
+          () => addWords(groups, parsed.name, list),
+          `added ${parsed.name}: ${describeFilter({ keyword: list })}\n`,
+        );
+      }
+      case "remove": {
+        const parsed = parseWrite(ctx, "remove", rest, true);
+        if (parsed === null) return EXIT.USAGE;
+        const list = words(parsed.list);
+        if (list.length === 0) {
+          ctx.out.error(`groups remove ${parsed.name} needs at least one word\n`);
+          return EXIT.USAGE;
+        }
+        return guarded(
+          ctx,
+          path,
+          () => removeWords(groups, parsed.name, list),
+          `removed from ${parsed.name}: ${list.join(", ")}\n`,
+        );
+      }
+      case "set": {
+        const built = fragmentFromArgs(ctx);
+        if (typeof built === "string") {
+          ctx.out.error(`${built}\n`);
+          return EXIT.USAGE;
+        }
+        const name = rest[0];
+        if (name === undefined || name === "") {
+          ctx.out.error("groups set needs a group name\n");
+          return EXIT.USAGE;
+        }
+        return guarded(
+          ctx,
+          path,
+          () => setFields(groups, name, built.fragment),
+          `set ${name}: ${describeFilter(built.fragment)}\n`,
+        );
+      }
+      case "unset": {
+        const parsed = parseWrite(ctx, "unset", rest, true);
+        if (parsed === null) return EXIT.USAGE;
+        const keys = words(parsed.list);
+        return guarded(
+          ctx,
+          path,
+          () => unsetFields(groups, parsed.name, keys),
+          `unset from ${parsed.name}: ${keys.join(", ")}\n`,
+        );
+      }
+      case "drop": {
+        const parsed = parseWrite(ctx, "drop", rest, false);
+        if (parsed === null) return EXIT.USAGE;
+        return guarded(ctx, path, () => dropGroup(groups, parsed.name), `dropped ${parsed.name}\n`);
       }
       default:
         ctx.out.error(

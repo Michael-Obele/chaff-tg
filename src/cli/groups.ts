@@ -20,7 +20,7 @@
  * config directory, which no config value moves, so this reads no `config.json`
  * and cannot fail because of one.
  */
-import { loadGroups, mergeGroups } from "../core/groups";
+import { loadGroups, mergeGroups, thinGroup, type GroupFilter } from "../core/groups";
 import { resolvePaths } from "../core/session";
 import type { Filters } from "../core/types";
 import type { CommandContext } from "./index";
@@ -33,4 +33,22 @@ export function applyGroups(ctx: CommandContext): Filters {
   if (ctx.args.groupNames.length === 0) return ctx.args.filters;
   const groups = loadGroups(resolvePaths(ctx.env).groupsPath());
   return mergeGroups(groups, ctx.args.groupNames, ctx.args.filters, ctx.args.provided);
+}
+
+/**
+ * The filter fields the command line actually chose, as a group fragment.
+ * `chaff groups set NAME --scam --type channel` saves exactly what the same
+ * flags would have filtered with, which is why the flag table is the only
+ * validation this verb needs.
+ *
+ * Returns the refusal as a string when nothing was typed: a `set` that stored
+ * an empty fragment would look like a group that matches everything, which is
+ * the opposite of what the user meant.
+ */
+export function fragmentFromArgs(ctx: CommandContext): { fragment: GroupFilter } | string {
+  const fragment = thinGroup(ctx.args.filters);
+  if (Object.keys(fragment).length === 0) {
+    return "groups set needs at least one filter flag, for example: chaff groups set junk --scam";
+  }
+  return { fragment };
 }
