@@ -48,6 +48,16 @@ export interface TelegramClientLike {
   getChat(chatId: unknown): Promise<unknown>;
   /** `getMe()`: the authorized user. */
   getMe(): Promise<unknown>;
+  /**
+   * `stopUpdatesLoop()`: stop the background `updates.getDifference` loop.
+   *
+   * `destroy()` aborts that loop rather than stopping it
+   * (`network/client.js:153-158` in the installed library), so a fetch already
+   * in flight retries into destroyed storage and logs `Session is reset` and
+   * `Client is destroyed` at warning level, after the run has already
+   * succeeded. Stopping is quiet; aborting is not.
+   */
+  stopUpdatesLoop(): Promise<void>;
   /** `destroy()`: close the connection and release the session. */
   destroy(): Promise<void>;
 }
@@ -373,8 +383,16 @@ export class TelegramApi {
     return { id, username: asString(me?.["username"]) };
   }
 
-  /** Close the client and release the session file. */
+  /**
+   * Close the client and release the session file.
+   *
+   * The updates loop is stopped first, on purpose. `destroy()` on its own aborts
+   * it, and an aborted `getDifference` retries against a storage that is already
+   * gone, which is where the `Session is reset` and `Client is destroyed`
+   * warnings after a clean run come from.
+   */
   async destroy(): Promise<void> {
+    await this.client.stopUpdatesLoop();
     await this.client.destroy();
   }
 }

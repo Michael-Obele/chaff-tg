@@ -195,6 +195,9 @@ export class FakeClient implements TelegramClientLike {
   /** Whether `destroy()` was called. */
   destroyed = false;
 
+  /** Whether `stopUpdatesLoop` was called, so a test can prove the order. */
+  updatesStopped = false;
+
   private readonly raws: unknown[];
   private readonly failures: FakeFailure[];
   private readonly account: Account;
@@ -255,6 +258,15 @@ export class FakeClient implements TelegramClientLike {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+  }
+
+  /**
+   * The fixture's answer to `stopUpdatesLoop`. There is no updates loop to stop,
+   * so this records that it was asked, which is what lets a test prove the
+   * real seam stops the loop before tearing the client down.
+   */
+  async stopUpdatesLoop(): Promise<void> {
+    this.updatesStopped = true;
   }
 
   /**

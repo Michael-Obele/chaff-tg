@@ -269,6 +269,7 @@ describe("TelegramApi", () => {
       async getMe() {
         return { id: 1 };
       },
+      async stopUpdatesLoop() {},
       async destroy() {},
     };
     await collect(new TelegramApi(seam).dialogs({ limit: 5 }));
@@ -327,9 +328,36 @@ describe("TelegramApi", () => {
       async getMe() {
         return { username: "nameless" };
       },
+      async stopUpdatesLoop() {},
       async destroy() {},
     };
     await expect(new TelegramApi(seam).me()).rejects.toThrow(/no account id/);
+  });
+
+  test("destroy() stops the updates loop before destroying the client", async () => {
+    // mtcute's destroy() aborts the updates loop instead of stopping it, and an
+    // aborted getDifference retries into dead storage: that is where the
+    // `Session is reset` / `Client is destroyed` warnings after a clean run come
+    // from. Order is the whole point, so the test records it.
+    const calls: string[] = [];
+    const seam: TelegramClientLike = {
+      async *iterDialogs() {},
+      async leaveChat() {},
+      async getChat() {
+        return {};
+      },
+      async getMe() {
+        return { id: 1 };
+      },
+      async stopUpdatesLoop() {
+        calls.push("stopUpdatesLoop");
+      },
+      async destroy() {
+        calls.push("destroy");
+      },
+    };
+    await new TelegramApi(seam).destroy();
+    expect(calls).toEqual(["stopUpdatesLoop", "destroy"]);
   });
 
   test("leave() forwards the clear flag and records the call", async () => {
