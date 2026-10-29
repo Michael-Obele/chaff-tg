@@ -6,7 +6,7 @@ import pkg from "../package.json";
 import { EXIT } from "../src/core/errors";
 import { DEFAULT_CONFIG } from "../src/core/index";
 import type { Filters } from "../src/core/types";
-import { parseArgs, UsageError, type ParsedArgs } from "../src/cli/args";
+import { parseArgs, UsageError, words, type ParsedArgs } from "../src/cli/args";
 import {
   CLI_COMMIT,
   CLI_VERSION,
@@ -620,3 +620,63 @@ function sink(): Sink {
     },
   };
 }
+
+describe("--group", () => {
+  test("collects the names in order", () => {
+    expect(parseArgs(["list", "--group", "deals,betting"]).groupNames).toEqual([
+      "deals",
+      "betting",
+    ]);
+  });
+
+  test("accumulates across repeats without duplicating", () => {
+    expect(parseArgs(["list", "--group", "deals", "--group", "deals,betting"]).groupNames).toEqual([
+      "deals",
+      "betting",
+    ]);
+  });
+
+  test("is empty when the flag is absent", () => {
+    expect(parseArgs(["list"]).groupNames).toEqual([]);
+  });
+
+  test("is recorded in provided under its own name", () => {
+    expect(parseArgs(["list", "--group", "deals"]).provided.has("group")).toBe(true);
+  });
+
+  test("does not touch the filter set", () => {
+    const args = parseArgs(["list", "--group", "deals"]);
+    expect(args.filters.keyword).toEqual([]);
+  });
+});
+
+describe("positionals", () => {
+  test("groups takes a verb and a name", () => {
+    const args = parseArgs(["groups", "add", "deals"]);
+    expect(args.command).toBe("groups");
+    expect(args.positional).toEqual(["add", "deals"]);
+  });
+
+  test("a bare command carries none", () => {
+    expect(parseArgs(["groups"]).positional).toEqual([]);
+  });
+
+  test("flags beside positionals still parse", () => {
+    const args = parseArgs(["groups", "set", "deals", "--scam", "--type", "channel"]);
+    expect(args.positional).toEqual(["set", "deals"]);
+    expect(args.filters.scam).toBe(true);
+    expect(args.filters.types).toEqual(["channel"]);
+  });
+
+  test("every other command still refuses a second bare token", () => {
+    expect(() => parseArgs(["list", "foo"])).toThrow(
+      'unexpected argument "foo"; chaff takes one command',
+    );
+  });
+
+  test("groups refuses a third token by name and number", () => {
+    expect(() => parseArgs(["groups", "add", "deals", "extra"])).toThrow(
+      /groups takes at most 2 words/,
+    );
+  });
+});

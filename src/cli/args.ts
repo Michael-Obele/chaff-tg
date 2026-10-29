@@ -99,6 +99,19 @@ export interface ParsedArgs {
   command: string | null;
   flags: GlobalFlags;
   filters: Filters;
+  /**
+   * The group names `--group` was given, in the order typed, deduped. Deliberately
+   * not in `Filters`: a group is folded in at the CLI edge (src/cli/groups.ts,
+   * plan/groups.md) so the engine, the `Filters` type and the manifest schema
+   * stay exactly as they are.
+   */
+  groupNames: string[];
+  /**
+   * Bare tokens after the command word. Only the commands named in `POSITIONALS`
+   * accept them, so every other command still refuses a second bare token with
+   * the original message.
+   */
+  positional: string[];
   selection: Selection;
   /**
    * The canonical long names of the flags that were actually given, so a
@@ -138,6 +151,8 @@ export interface FlagSpec {
 export interface Builder {
   flags: GlobalFlags;
   filters: Filters;
+  groupNames: string[];
+  positional: string[];
   selection: Selection;
   provided: Set<string>;
   /** `--run <id>` for `journal --run <id>`; only that command reads it. */
@@ -180,6 +195,14 @@ const CHAT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * How many bare tokens each command accepts after its own name. `groups` takes a
+ * verb and a name; the flags a verb may need follow it as flags. Nothing else
+ * takes any, which keeps `chaff list foo` a usage error rather than a silently
+ * ignored word.
+ */
+const POSITIONALS: Readonly<Record<string, number>> = { groups: 2 };
+
+/**
  * What `--type group` means: the whole group family, not the legacy spelling.
  *
  * Telegram represents a "group" three ways (`Chat.chatType`): a legacy basic
@@ -202,8 +225,12 @@ const CHAT_ID = /^-?\d+$/;
 /** `--members 0-50`: an inclusive range, both ends whole numbers. */
 const MEMBERS_RANGE = /^(\d+)-(\d+)$/;
 
-/** A comma separated list, trimmed, with the empty entries a trailing comma leaves. */
-function words(value: string): string[] {
+/**
+ * A comma separated list, trimmed, with the empty entries a trailing comma
+ * leaves. The groups command splits its word and field lists with the same
+ * rule, so the two cannot drift apart.
+ */
+export function words(value: string): string[] {
   return value
     .split(",")
     .map((word) => word.trim())
@@ -324,6 +351,17 @@ const FILTER_FLAGS: readonly FlagSpec[] = [
     help: "Exclude chats whose title or username matches any of these",
     set: (b, value) => {
       b.filters.not = words(value);
+    },
+  },
+  {
+    name: "group",
+    group: "filters",
+    argument: "<list>",
+    help: "Fold in saved filter groups, by name (see `chaff groups`)",
+    set: (b, value) => {
+      for (const name of words(value)) {
+        if (!b.groupNames.includes(name)) b.groupNames.push(name);
+      }
     },
   },
   {
@@ -780,6 +818,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       dryRun: false,
     },
     filters: emptyFilters(),
+    groupNames: [],
+    positional: [],
     selection: {
       select: null,
       from: null,
@@ -798,13 +838,20 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     const token = argv[index] ?? "";
 
     if (!token.startsWith("-") || token === "-") {
-      if (command !== null) {
-        throw new UsageError(
-          `unexpected argument ${JSON.stringify(token)}; chaff takes one command`,
-        );
+      if (command === null) {
+        command = token;
+        continue;
       }
-      command = token;
-      continue;
+      const max = POSITIONALS[command];
+      if (max !== undefined && builder.positional.length < max) {
+        builder.positional.push(token);
+        continue;
+      }
+      throw new UsageError(
+        max === undefined
+          ? `unexpected argument ${JSON.stringify(token)}; chaff takes one command`
+          : `${command} takes at most ${max} words after it, got ${JSON.stringify(token)}`,
+      );
     }
 
     const equals = token.indexOf("=");
@@ -848,6 +895,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     command,
     flags: builder.flags,
     filters: builder.filters,
+    groupNames: builder.groupNames,
+    positional: builder.positional,
     selection: builder.selection,
     provided: new Set(builder.provided),
     runId: builder.runId,
