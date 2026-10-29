@@ -21,6 +21,7 @@
  * and cannot fail because of one.
  */
 import {
+  FORBIDDEN_FLAGS,
   forbiddenKeyMessage,
   loadGroups,
   mergeGroups,
@@ -40,19 +41,6 @@ export function applyGroups(ctx: CommandContext): Filters {
   const groups = loadGroups(resolvePaths(ctx.env).groupsPath());
   return mergeGroups(groups, ctx.args.groupNames, ctx.args.filters, ctx.args.provided);
 }
-
-/**
- * The filter flags whose fields a group may not hold, as the field each one
- * writes. `provided` spells the ids flag `id` while the field is `ids`, so the
- * two are named apart here rather than assumed to match: a check that silently
- * missed `--id` would be the same bug this function exists to close.
- */
-const FORBIDDEN_FLAGS: ReadonlyMap<string, string> = new Map([
-  ["id", "ids"],
-  ["include", "include"],
-  ["exclude", "exclude"],
-  ["limit", "limit"],
-]);
 
 /**
  * The filter fields the command line actually chose, as a group fragment.

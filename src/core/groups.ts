@@ -74,6 +74,21 @@ export type GroupKey = (typeof GROUP_KEYS)[number];
  */
 export const FORBIDDEN_KEYS = ["ids", "include", "exclude", "limit"] as const;
 
+/**
+ * The filter flags whose fields a group may not hold, mapped to the field each
+ * one writes. `--id` is spelled apart from the `ids` field, so the two are named
+ * apart rather than assumed to match: a check keyed by field name would let
+ * `chaff groups set junk --id -1001` through, and that is the bug this map exists
+ * to stop. Lives beside {@link FORBIDDEN_KEYS} so the CLI and the file format
+ * cannot drift into two opinions about the same four fields.
+ */
+export const FORBIDDEN_FLAGS: ReadonlyMap<string, string> = new Map([
+  ["id", "ids"],
+  ["include", "include"],
+  ["exclude", "exclude"],
+  ["limit", "limit"],
+]);
+
 /** The fields whose lists widen the net when two sources both set them. */
 export const UNION_KEYS: readonly GroupKey[] = ["types", "keyword", "any", "not"];
 

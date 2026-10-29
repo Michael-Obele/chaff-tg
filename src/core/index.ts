@@ -75,6 +75,7 @@ export {
   dropGroup,
   FLAG_NAMES,
   FORBIDDEN_KEYS,
+  FORBIDDEN_FLAGS,
   forbiddenKeyMessage,
   GROUP_KEYS,
   GROUPS_VERSION,
