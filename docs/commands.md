@@ -554,6 +554,29 @@ chaff leave --from cleanup.json --yes                         # act
 Two `report` calls on purpose: the manifest is what `leave` eats, and the markdown is what
 you read. Keep both out of git.
 
+### Leave the deal, signal and betting channels
+
+```bash
+chaff list --keyword amazon,trading,sports,betting --type channel
+chaff report --keyword amazon,trading,sports,betting --type channel --out cleanup.json
+chaff report --from cleanup.json --md --out cleanup.md
+$EDITOR cleanup.md
+chaff leave --from cleanup.json --dry-run
+chaff leave --from cleanup.json --yes
+```
+
+The four words inside one `--keyword` combine with OR: a chat holding any one of them is in
+the plan. Filters on different flags still combine with AND, so adding `--muted` narrows the
+same four words to the muted chats only. Swap `--keyword` for `-r 'amazon|trading|sport|bet'`
+when you want word edges or stems the substring test cannot give you.
+
+Two things this cannot see:
+
+- A channel that posts Amazon links but is titled `Prime Finds` is not matched. Keywords read
+  the title and the username, never the messages.
+- `--type channel` leaves groups alone. Drop the flag, or pass `--type channel,supergroup`, to
+  catch a supergroup named `Amazon Sellers Support`.
+
 ### Leave by hand-picked ids
 
 ```bash
