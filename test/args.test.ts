@@ -376,6 +376,7 @@ describe("runCli: dispatch, version, help, and stubs", () => {
       "report",
       "leave",
       "journal",
+      "groups",
       "doctor",
       "logout",
       "tui",

@@ -36,6 +36,7 @@ import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
 import { checkCommand } from "./commands/check";
 import { doctorCommand } from "./commands/doctor";
+import { groupsCommand } from "./commands/groups";
 import { journalCommand } from "./commands/journal";
 import { leaveCommand } from "./commands/leave";
 import { listCommand } from "./commands/list";
@@ -159,6 +160,7 @@ export const COMMANDS: readonly Command[] = [
   reportCommand,
   leaveCommand,
   journalCommand,
+  groupsCommand,
   doctorCommand,
   logoutCommand,
   tuiCommand,

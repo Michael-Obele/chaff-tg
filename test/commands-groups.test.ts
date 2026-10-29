@@ -99,3 +99,82 @@ describe("--group", () => {
     expect(replay.code).toBe(EXIT.OK);
   });
 });
+
+describe("chaff groups (read)", () => {
+  test("says how to create the first one", async () => {
+    const { root, env } = fakeEnv();
+    roots.push(root);
+    const result = await run(["groups"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(result.stdout.text()).toContain("no groups yet");
+    expect(result.stdout.text()).toContain("chaff groups add");
+  });
+
+  test("prints every group and the fields it sets", async () => {
+    const { env } = withGroups({
+      junk: { keyword: ["amazon", "voucher"], scam: true },
+      dead: { unavailable: true, inactiveDays: 365 },
+    });
+    const result = await run(["groups"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(result.stdout.text()).toContain("junk");
+    expect(result.stdout.text()).toContain("keyword:amazon|voucher");
+    expect(result.stdout.text()).toContain("scam");
+    expect(result.stdout.text()).toContain("inactiveDays:365");
+  });
+
+  test("--json prints the fragments, not the rendering", async () => {
+    const { env } = withGroups({ junk: { keyword: ["amazon"], scam: true } });
+    const result = await run(["groups", "--json"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(JSON.parse(result.stdout.text())).toEqual({
+      groups: [{ name: "junk", filter: { keyword: ["amazon"], scam: true } }],
+    });
+  });
+
+  test("show prints one group, one field per line", async () => {
+    const { env } = withGroups({ junk: { keyword: ["amazon"], scam: true }, other: {} });
+    const result = await run(["groups", "show", "junk"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(result.stdout.text()).toContain("keyword");
+    expect(result.stdout.text()).toContain("amazon");
+    expect(result.stdout.text()).not.toContain("other");
+  });
+
+  test("show --json prints the fragment", async () => {
+    const { env } = withGroups({ junk: { keyword: ["amazon"] } });
+    const result = await run(["groups", "show", "junk", "--json"], env);
+    expect(JSON.parse(result.stdout.text())).toEqual({
+      name: "junk",
+      filter: { keyword: ["amazon"] },
+    });
+  });
+
+  test("show of a name that is not there is exit 2 and lists what is", async () => {
+    const { env } = withGroups({ junk: { keyword: ["amazon"] } });
+    const result = await run(["groups", "show", "nope"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("junk");
+  });
+
+  test("show without a name is exit 2", async () => {
+    const { env } = withGroups({ junk: {} });
+    const result = await run(["groups", "show"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("needs a group name");
+  });
+
+  test("an unknown verb is exit 2 and says what the verbs are", async () => {
+    const { env } = withGroups({ junk: {} });
+    const result = await run(["groups", "frobnicate", "junk"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("show, add, remove, set, unset, drop");
+  });
+
+  test("needs no client, no session and no CHAFF_FAKE", async () => {
+    const { root, env } = fakeEnv({ CHAFF_FAKE: undefined, CHAFF_FIXTURE: undefined });
+    roots.push(root);
+    const result = await run(["groups"], env);
+    expect(result.code).toBe(EXIT.OK);
+  });
+});
