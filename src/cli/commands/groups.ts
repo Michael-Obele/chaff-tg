@@ -108,7 +108,13 @@ function renderOne(ctx: CommandContext, name: string, fragment: GroupFilter): nu
   for (const key of GROUP_KEYS) {
     const value = fragment[key];
     if (value === undefined) continue;
-    lines.push([key, describeFilter({ [key]: value } as GroupFilter).replace(`${key}:`, "")]);
+    // A switch has no value to show, and `scam  scam` reads like a bug. The
+    // table form prints it bare; here the column pair needs the word.
+    const shown =
+      value === true
+        ? "true"
+        : describeFilter({ [key]: value } as GroupFilter).replace(`${key}:`, "");
+    lines.push([key, shown]);
   }
   if (lines.length === 0) lines.push(["(no fields set)", "-"]);
   ctx.out.document({
@@ -174,6 +180,33 @@ function parseWrite(
   return { name, list: list ?? "" };
 }
 
+/**
+ * The shape `add` and `remove` share: a name, a word list, one mutation, one
+ * confirming line.
+ *
+ * They differ only in which mutation runs and what the line says. Leaving that
+ * as two copies is how one gets a fix and the other does not, which is exactly
+ * what happened while the arity checks were being added.
+ */
+function wordVerb(
+  ctx: CommandContext,
+  path: string,
+  verb: "add" | "remove",
+  groups: Groups,
+  rest: string[],
+  change: (groups: Groups, name: string, list: string[]) => Groups,
+  message: (name: string, list: string[]) => string,
+): number {
+  const parsed = parseWrite(ctx, verb, rest, true);
+  if (parsed === null) return EXIT.USAGE;
+  const list = words(parsed.list);
+  if (list.length === 0) {
+    ctx.out.error(`groups ${verb} ${parsed.name} needs at least one word\n`);
+    return EXIT.USAGE;
+  }
+  return guarded(ctx, path, () => change(groups, parsed.name, list), message(parsed.name, list));
+}
+
 export const groupsCommand: Command = {
   name: "groups",
   summary: "List, edit and reuse your saved filter groups",
@@ -210,36 +243,26 @@ export const groupsCommand: Command = {
         }
         return renderOne(ctx, name, fragment);
       }
-      case "add": {
-        const parsed = parseWrite(ctx, "add", rest, true);
-        if (parsed === null) return EXIT.USAGE;
-        const list = words(parsed.list);
-        if (list.length === 0) {
-          ctx.out.error(`groups add ${parsed.name} needs at least one word\n`);
-          return EXIT.USAGE;
-        }
-        return guarded(
+      case "add":
+        return wordVerb(
           ctx,
           path,
-          () => addWords(groups, parsed.name, list),
-          `added ${parsed.name}: ${describeFilter({ keyword: list })}\n`,
+          "add",
+          groups,
+          rest,
+          addWords,
+          (name, list) => `added ${name}: ${describeFilter({ keyword: list })}\n`,
         );
-      }
-      case "remove": {
-        const parsed = parseWrite(ctx, "remove", rest, true);
-        if (parsed === null) return EXIT.USAGE;
-        const list = words(parsed.list);
-        if (list.length === 0) {
-          ctx.out.error(`groups remove ${parsed.name} needs at least one word\n`);
-          return EXIT.USAGE;
-        }
-        return guarded(
+      case "remove":
+        return wordVerb(
           ctx,
           path,
-          () => removeWords(groups, parsed.name, list),
-          `removed from ${parsed.name}: ${list.join(", ")}\n`,
+          "remove",
+          groups,
+          rest,
+          removeWords,
+          (name, list) => `removed from ${name}: ${list.join(", ")}\n`,
         );
-      }
       case "set": {
         if (rest.length > 1) {
           ctx.out.error(
