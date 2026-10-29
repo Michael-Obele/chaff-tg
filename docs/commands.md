@@ -19,6 +19,7 @@
   - [report](#report)
   - [leave](#leave)
   - [journal](#journal)
+  - [groups](#groups)
   - [doctor](#doctor)
   - [logout](#logout)
   - [tui](#tui)
@@ -168,11 +169,11 @@ only. Give it ids with `--id` (comma separated, the ids from `chaff list --json`
 come first.
 
 ```text
-Checked 3 chats: 2 ok, 0 banned, 0 unavailable, 1 gone
-            id  status  title
--1002919634257  ok      TikTok Storage
--1003587289513  ok      Ongoing Station
-     -99999999  gone    -
+Checked 3 chats: 2 ok, 0 banned, 0 unavailable, 1 gone, 1 restricted
+       id  status  title               restricted  restriction
+    -1001  ok      Signal Room         false       -
+    -1002  ok      Crypto Chat Lounge  true        copyright
+-99999999  gone    -                   false       -
 ```
 
 | Status        | Meaning                                                                                                                | What to do                                                  |
@@ -182,8 +183,21 @@ Checked 3 chats: 2 ok, 0 banned, 0 unavailable, 1 gone
 | `unavailable` | Telegram's wider judgement: banned, or a group you left, or a private channel you are no longer in.                    | Read the title before acting. This one has false positives. |
 | `gone`        | The id cannot be resolved any more, either because the chat is deleted or because this account never had access to it. | Nothing to leave. Drop the id.                              |
 
-`--json` prints `{ "chats": [ { "id", "status", "title" } ] }`, with `title` as `null` for a
-gone chat rather than a dash.
+`--json` prints `{ "chats": [ { "id", "status", "title", "restricted", "restriction" } ] }`, with
+`title` as `null` for a gone chat rather than a dash, and `restriction` as `null` when there is
+no reason to report.
+
+**Why a chat is blocked, when Telegram says.** `restricted` is Telegram's own flag and
+`restriction` lists the reasons it gives, comma joined, for example `copyright`. This is the only
+place that question has an answer, because a chat that comes back _forbidden_ carries no reason
+at all: in the current TL layer a forbidden peer is an id, an access hash, a title and an optional
+expiry. So `banned` cannot tell you whether it was copyright, spam or you being kicked, and a
+copyright block is only visible when the chat arrives restricted instead of forbidden. The summary
+line counts restricted chats, and only says so when there is at least one.
+
+There is no `--restricted` filter yet, on purpose: whether a dialog listing carries the flag at
+all has to be measured against a real account before a filter can promise anything. Until it is,
+`check` is how you find out.
 
 Two things to know before you rely on it:
 
@@ -354,6 +368,95 @@ banned from. Skips are not failures and do not change the exit code.
 The journal is how a resumed run avoids leaving the same chat twice: a chat already marked
 `left` or `skipped` in the same session is settled, and a later run will not touch it.
 
+### groups
+
+```text
+chaff groups [list | show NAME | add NAME LIST | remove NAME LIST | set NAME [filters] | unset NAME KEYS | drop NAME]
+```
+
+Saves a filter under a name, so the next cleanup does not have to retype it. The file is
+`~/.config/chaff-tg/groups.json`, it holds no secret, and you can edit it with any editor. This
+command never touches Telegram, so it works before `chaff login` does.
+
+```text
+$ chaff groups
+no groups yet: create one with `chaff groups add NAME word,word`
+name  sets
+
+$ chaff groups add junk signal,airdrop
+added junk: keyword:signal|airdrop
+
+$ chaff groups set junk --scam
+set junk: scam
+
+$ chaff groups
+name  sets
+junk  keyword:signal|airdrop scam
+
+$ chaff groups show junk
+item     value
+keyword  signal|airdrop
+scam     true
+
+$ chaff list --group junk
+Found 1 chats
+   id  type     title        username    members  last        flags
+-1001  channel  Signal Room  signalroom     4821  2024-08-02  muted unread:412 scam
+```
+
+| Verb     | Arguments                                      | Does                                                                                    |
+| -------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `list`   | none                                           | Every group and the fields it sets. This is what a bare `chaff groups` runs.            |
+| `show`   | one, the name                                  | One group, one field per line.                                                          |
+| `add`    | two, the name and a comma separated word list  | Unions the words into the group's `keyword`, creating the group when the name is new.   |
+| `remove` | two                                            | Drops those words from `keyword`. Words that are not there are ignored.                 |
+| `set`    | one, the name, plus any filter flags           | Writes exactly the fields you typed, replacing those fields and leaving the rest alone. |
+| `unset`  | two, the name and a comma separated field list | Removes those fields.                                                                   |
+| `drop`   | one, the name                                  | Deletes the group.                                                                      |
+
+`set` takes the filter flags as they are documented under [Filters](#filters), so the line you
+use to try a filter is the line you use to save it, and it inherits their parsing: `chaff groups
+set junk --inactive-days 365 --type channel` stores those two fields and nothing else.
+
+**What a group may hold.** Any of these 15 fields: `types`, `keyword`, `any`, `not`, `regex`,
+`muted`, `archived`, `inactiveDays`, `members`, `scam`, `fake`, `banned`, `unavailable`, `unread`,
+`pinned`. It may not hold `ids`, `include`, `exclude` or `limit`. The first three name particular
+chats rather than a kind of chat, and `exclude` beats everything including the checklist, so a
+saved group that could hold one could quietly change what a run refuses to touch, from a file
+nobody is looking at. `limit` is a pagination guard for one run.
+
+**How a group is applied.** Two rules, and nothing else.
+
+1. The lists `keyword`, `any`, `not` and `types` union: the group's entries first, then the ones
+   you typed. More entries mean a wider net, which is what `--keyword a,b` already does.
+2. Every other field is chosen by precedence. A flag you type beats a group value, and a group
+   value beats the unset default. This is the same rule the config file follows.
+
+Two groups that set different values for the same non-list field are refused rather than tied:
+
+```text
+no group named "nosuch". groups you have: junk
+groups deals and betting both set --inactive-days, to 30 and 365; pick one group, or pass --inactive-days yourself to decide
+```
+
+**Refusals.** Each verb takes exactly the arguments listed above and refuses a stray one by name,
+and an empty list is a refusal rather than a success that did nothing:
+
+```text
+$ chaff groups show junk extra
+groups show takes exactly one argument (the group name), got "extra"
+
+$ chaff groups unset junk ""
+groups unset junk needs at least one word
+```
+
+`add` and `set` create a group. `remove`, `unset` and `drop` refuse a name that is not in the
+file, because creating a group is not what those verbs are for.
+
+Exits `0` when it did what you asked, `2` for a bad verb, a stray argument, a name that is not
+there, a field a group cannot hold, or a `groups.json` it cannot read. A file that is broken is
+refused before anything is written, and stays exactly as it was.
+
 ### doctor
 
 ```text
@@ -425,8 +528,7 @@ combine with OR.
 | `--type LIST`                 | Chat types                                      | `group` means the whole group family: a legacy group, a supergroup and a broadcast group. Also `supergroup`, `channel`, `gigagroup`, `monoforum`, `community`. Default: all.           |
 | `-k, --keyword LIST`          | Title or username contains a word               | Case insensitive. Comma separated.                                                                                                                                                     |
 | `-K, --any LIST`              | Same as `--keyword`                             | Kept for readability in scripts. `--keyword a,b` is already OR.                                                                                                                        |
-| `--not LIST`                  | Title or username contains none of these        | Applies to title and username.                                                                                                                                                         |
-| `-r, --regex PATTERN`         | Title matches a regular expression              | Case insensitive, applied after the keyword filters.                                                                                                                                   |
+| `--not LIST`                  | Title or username contains none of these        | Applies to title and username.                                                                                                                                                         |     | `--group LIST` | The fields of saved groups, folded in | Comma separated names from `~/.config/chaff-tg/groups.json`. See [groups](#groups). Words union with `--keyword`; a typed flag beats a group value. `check` accepts it and ignores it, the same way it ignores `--keyword`. |     | `-r, --regex PATTERN` | Title matches a regular expression | Case insensitive, applied after the keyword filters. |
 | `--id LIST`                   | Exactly these ids                               | Use the ids from `chaff list --json`.                                                                                                                                                  |
 | `--muted`, `--not-muted`      | Mute state                                      | `--muted` means you muted it. A chat on the account default is neither.                                                                                                                |
 | `--archived`, `--no-archived` | Archive state                                   | Archived chats are always gathered, so both directions work.                                                                                                                           |
@@ -577,6 +679,25 @@ Two things this cannot see:
 - `--type channel` leaves groups alone. Drop the flag, or pass `--type channel,supergroup`, to
   catch a supergroup named `Amazon Sellers Support`.
 
+### Save the words once, then reuse them
+
+```bash
+chaff groups add junk amazon,trading,sports,betting
+chaff groups set junk --scam --type channel
+chaff groups                                   # read them back
+chaff list --group junk
+chaff report --group junk --out cleanup.json
+chaff leave --from cleanup.json --dry-run
+chaff leave --from cleanup.json --yes
+```
+
+The fields live in `~/.config/chaff-tg/groups.json`, which you can edit with any editor. The
+manifest records the merged fields, not the group name, so `chaff leave --from` replays the same
+plan even if the file changes or the group is dropped in between. After the two lines above, the
+`filters` block of `cleanup.json` reads `{ "keyword": [ "amazon", "trading", "sports", "betting"
+], "scam": true, "types": [ "channel" ] }`, and each chat's `why` reads `keyword:amazon` or
+`scam`, the field that pulled it in rather than the name of a list you would have to go and open.
+
 ### Leave by hand-picked ids
 
 ```bash
@@ -619,23 +740,27 @@ Point `CHAFF_FAKE_FAILURES` at a chat to rehearse the failure and flood paths.
 
 ## Troubleshooting
 
-| Symptom                                                 | Cause and fix                                                                                                                            |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `chaff: command not found`                              | `bun link` has not run. Either run it once, or use `bun run src/cli/index.ts`.                                                           |
-| `not logged in: there is no session file at …` (exit 3) | Run `chaff login`, or check `chaff doctor` for the path it looked at.                                                                    |
-| `Found 0 chats`                                         | Filters are ANDed, so one narrow flag empties the list. Start from `chaff list` with no filters and add one at a time.                   |
-| `--type group` returns nothing                          | It should not: `group` includes supergroups. Check the other filters, and check `--muted`, since most junk is muted rather than unmuted. |
-| `list --banned` returns nothing                         | Expected. Telegram removes banned chats from your dialog list. Use `chaff check` with the ids instead.                                   |
-| The checklist appears even though `--yes` was passed    | A terminal is attached. `--select` is the way to skip the checklist on purpose.                                                          |
-| `--out` wrote markdown where a manifest was expected    | `--md` and `--csv` put the rendered table in `--out`. Only the default table format and `--json` write a manifest there.                 |
-| Exit `4`                                                | Some leaves failed. `chaff journal --run ID` shows which, with the error.                                                                |
-| Exit `5`                                                | A long flood wait stopped the run. Wait, then run the same command again; it resumes.                                                    |
-| A path with `~` was not found                           | `--out` writes exactly where you point it. Only `sessionDir` expands `~`.                                                                |
-| `chaff tui` does not open anything                      | The full screen interface is not in this build.                                                                                          |
+| Symptom                                                       | Cause and fix                                                                                                                                                          |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chaff: command not found`                                    | `bun link` has not run. Either run it once, or use `bun run src/cli/index.ts`.                                                                                         |
+| `not logged in: there is no session file at …` (exit 3)       | Run `chaff login`, or check `chaff doctor` for the path it looked at.                                                                                                  |
+| `Found 0 chats`                                               | Filters are ANDed, so one narrow flag empties the list. Start from `chaff list` with no filters and add one at a time.                                                 |
+| `--group` finds nothing, or names a group you thought you had | The name is matched exactly, and `chaff groups` prints the names you have. A group that sets several fields ANDs them, so a `scam` group plus `--muted` asks for both. |
+| `--type group` returns nothing                                | It should not: `group` includes supergroups. Check the other filters, and check `--muted`, since most junk is muted rather than unmuted.                               |
+| `list --banned` returns nothing                               | Expected. Telegram removes banned chats from your dialog list. Use `chaff check` with the ids instead.                                                                 |
+| The checklist appears even though `--yes` was passed          | A terminal is attached. `--select` is the way to skip the checklist on purpose.                                                                                        |
+| `--out` wrote markdown where a manifest was expected          | `--md` and `--csv` put the rendered table in `--out`. Only the default table format and `--json` write a manifest there.                                               |
+| Exit `4`                                                      | Some leaves failed. `chaff journal --run ID` shows which, with the error.                                                                                              |
+| Exit `5`                                                      | A long flood wait stopped the run. Wait, then run the same command again; it resumes.                                                                                  |
+| A path with `~` was not found                                 | `--out` writes exactly where you point it. Only `sessionDir` expands `~`.                                                                                              |
+| `chaff tui` does not open anything                            | The full screen interface is not in this build.                                                                                                                        |
 
 ## What this build does not do
 
 - **No full screen interface.** `chaff tui` prints a note. The seam is in place for it.
+- **No `--restricted` filter.** `chaff check` reports the reason a chat is restricted, but a
+  listing cannot filter on it until a real account shows whether the flag survives a dialog
+  listing. See [check](#check).
 - **No Telegram-wide discovery.** `chaff` works on the chats you already joined. Finding
   channels you are not in is a different feature.
 - **No reports to Telegram.** Leaving is the only action, and it is never automatic.

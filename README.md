@@ -310,6 +310,7 @@ chaff leave --select -1001234567890,-1009876543210 --yes
 | `chaff report`  | Writes a review manifest (table, JSON, CSV or markdown)           |
 | `chaff leave`   | Leaves the selected chats                                         |
 | `chaff journal` | Shows what previous runs did                                      |
+| `chaff groups`  | Lists, edits and reuses your saved filter groups                  |
 | `chaff doctor`  | Checks the local setup: paths, file modes, and config             |
 | `chaff logout`  | Deletes the local session file                                    |
 | `chaff tui`     | Prints a note: the full-screen interface is **not in this build** |
@@ -324,7 +325,9 @@ in [`docs/commands.md`](docs/commands.md).
 
 Filters worth knowing: `--muted`, `--inactive-days <n>`, `--members
 0-50`, `--scam`, `--fake`, `--type`, `-k/--keyword`, `-r/--regex`, `--archived`,
-`--read`. Two more are Telegram availability, not heuristics: `--banned` (the chat came back
+`--read`. Save a set of them under a name with `chaff groups` and reuse it
+anywhere the filters work with `--group NAME`; the fields live in a plain JSON
+file you can edit. Two more are Telegram availability, not heuristics: `--banned` (the chat came back
 forbidden) and `--unavailable` (wider: also groups you left). A banned chat is usually
 deleted from your list, which is what `chaff check` is for.
 
