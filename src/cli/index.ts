@@ -30,7 +30,7 @@
  * anything else exits 1. The core returns facts and this file turns them into
  * codes — the same rule `runLeave` follows, one level up.
  */
-import { ChaffError, EXIT } from "../core/errors";
+import { ChaffError, EXIT, classify } from "../core/errors";
 import { GroupsError } from "../core/groups";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
@@ -172,6 +172,37 @@ function messageOf(error: unknown): string {
 }
 
 /**
+ * The sentence and the exit code for a thrown value.
+ *
+ * The local failures already carry their own answer. Everything else goes to
+ * `classify`, whose whole job is turning Telegram's error text into a plain
+ * sentence: without this, a flood wait on a read printed
+ * `Telegram API error 420: FLOOD_WAIT_16` and exited 1.
+ *
+ * The classifier's own code is only used when it is meaningful here.
+ * `shortFlood` says `EXIT.OK` because a leave retries that internally, and no
+ * read does: exiting 0 with an empty stdout would be a lie, so it stays 1. A
+ * long flood keeps 5, which is what `plan/cli.md` documents for it.
+ */
+export function describeFailure(error: unknown): { message: string; exitCode: number } {
+  const known =
+    error instanceof UsageError ||
+    error instanceof NotLoggedInError ||
+    error instanceof GroupsError ||
+    error instanceof ChaffError;
+  if (known) return { message: messageOf(error), exitCode: exitCodeOf(error) };
+
+  const classified = classify(error);
+  if (classified.kind === "unknown") {
+    return { message: messageOf(error), exitCode: exitCodeOf(error) };
+  }
+  return {
+    message: classified.message,
+    exitCode: classified.exitCode === EXIT.OK ? EXIT.ERROR : classified.exitCode,
+  };
+}
+
+/**
  * The exit code a thrown value earns. A usage error is 2; a local precondition
  * a command can explain (`NotLoggedInError`) carries the code the plan gives
  * it, 3; a classified Telegram failure carries the code the taxonomy already
@@ -249,8 +280,9 @@ export async function runCli(
   try {
     return await command.run(commandContext);
   } catch (error) {
-    ctx.stderr.write(`${messageOf(error)}\n`);
-    return exitCodeOf(error);
+    const described = describeFailure(error);
+    ctx.stderr.write(`${described.message}\n`);
+    return described.exitCode;
   }
 }
 

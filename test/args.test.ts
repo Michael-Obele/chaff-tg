@@ -11,6 +11,7 @@ import {
   CLI_COMMIT,
   CLI_VERSION,
   COMMANDS,
+  describeFailure,
   promptable,
   runCli,
   versionLine,
@@ -648,6 +649,33 @@ describe("--group", () => {
   test("does not touch the filter set", () => {
     const args = parseArgs(["list", "--group", "deals"]);
     expect(args.filters.keyword).toEqual([]);
+  });
+});
+
+describe("describeFailure", () => {
+  test("a flood wait on a read becomes a sentence, not a raw code", () => {
+    const described = describeFailure(new Error("Telegram API error 420: FLOOD_WAIT_16"));
+    expect(described.message).toContain("wait 16 seconds");
+    expect(described.message).not.toContain("FLOOD_WAIT_16");
+    // Nothing retried it, so it stays a failure even though a leave would have
+    // handled a short wait internally.
+    expect(described.exitCode).toBe(EXIT.ERROR);
+  });
+
+  test("a wait past the limit keeps the documented flood code", () => {
+    expect(describeFailure(new Error("FLOOD_WAIT_3600")).exitCode).toBe(EXIT.FLOOD);
+  });
+
+  test("a local failure keeps its own message and code", () => {
+    const described = describeFailure(new UsageError("bad flag"));
+    expect(described.message).toBe("bad flag");
+    expect(described.exitCode).toBe(EXIT.USAGE);
+  });
+
+  test("an error that is not Telegram's is passed through untouched", () => {
+    const described = describeFailure(new TypeError("x is undefined"));
+    expect(described.message).toBe("x is undefined");
+    expect(described.exitCode).toBe(EXIT.ERROR);
   });
 });
 
