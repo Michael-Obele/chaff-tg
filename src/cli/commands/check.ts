@@ -33,12 +33,17 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The three columns: the id asked about, the verdict, and the title Telegram
- * still reports for it.
+ * The five columns: the id asked about, the verdict, the title Telegram still
+ * reports for it, and the two restriction fields.
  *
  * `title` carries a `json` reader because a gone chat prints as `-` in a table
  * but must stay `null` in JSON: "there is no title" and "the title is a dash"
  * are different answers, the same rule the `members` column follows.
+ *
+ * `restricted` and `restriction` are both printed because they answer different
+ * questions and can disagree: the flag is Telegram's, the reason list is only
+ * populated when the account is allowed to see it. A row can honestly read
+ * `true` with `-`, which is why the flag is not inferred from the reasons.
  */
 const CHECK_COLUMNS: ReadonlyArray<Column<ChatCheck>> = [
   { key: "id", header: "id", align: "right", value: (row) => String(row.id) },
