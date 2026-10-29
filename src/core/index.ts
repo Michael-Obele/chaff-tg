@@ -74,6 +74,8 @@ export {
   checkGroupName,
   dropGroup,
   FLAG_NAMES,
+  FORBIDDEN_KEYS,
+  forbiddenKeyMessage,
   GROUP_KEYS,
   GROUPS_VERSION,
   GroupsError,

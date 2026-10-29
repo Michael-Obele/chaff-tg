@@ -69,9 +69,11 @@ export const reportCommand: Command = {
     let plan: Plan;
 
     if (from === null) {
+      // Resolved before the client opens, as in `list`: a run that will refuse
+      // should not connect first.
+      const filters = applyGroups(ctx);
       const { api, account } = await openClient(ctx);
       try {
-        const filters = applyGroups(ctx);
         // The cap belongs at the source, as in `list`: the client stops asking
         // Telegram once it has `--limit` dialogs.
         const limit = filters.limit === null ? {} : { limit: filters.limit };

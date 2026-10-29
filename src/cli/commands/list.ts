@@ -105,9 +105,12 @@ export const listCommand: Command = {
   summary: "List dialogs as a table, with filters applied",
 
   async run(ctx) {
+    // Refuse a bad group name or a broken groups file before a client opens: a
+    // run that cannot work should not connect to Telegram first and fail
+    // afterwards. `leave` already resolves its filters this way.
+    const filters = applyGroups(ctx);
     const { api } = await openClient(ctx);
     try {
-      const filters = applyGroups(ctx);
       const limit = filters.limit === null ? {} : { limit: filters.limit };
 
       // The cap applies here, at the source: the client stops asking Telegram

@@ -453,6 +453,20 @@ groups unset junk needs at least one word
 `add` and `set` create a group. `remove`, `unset` and `drop` refuse a name that is not in the
 file, because creating a group is not what those verbs are for.
 
+`set` refuses a flag whose field a group cannot hold, by name, before it writes anything:
+
+```text
+$ chaff groups set junk --scam --exclude -1001
+"exclude" is not allowed in a group. A group holds types, keyword, any, not, regex, muted,
+archived, inactiveDays, members, scam, fake, banned, unavailable, unread, pinned. It cannot
+hold ids, include, exclude, limit: those name particular chats or cap one run, and `exclude`
+beats the checklist.
+```
+
+It refuses `--group` inside itself too, because folding one group into another is not in this
+design: `groups set does not fold in other groups: name the fields you want, or edit the two
+groups by hand`.
+
 Exits `0` when it did what you asked, `2` for a bad verb, a stray argument, a name that is not
 there, a field a group cannot hold, or a `groups.json` it cannot read. A file that is broken is
 refused before anything is written, and stays exactly as it was.
@@ -523,25 +537,27 @@ exits `0`.
 Every filter is off unless you pass it. Filters combine with AND; the words inside one flag
 combine with OR.
 
-| Flag                          | Matches                                         | Notes                                                                                                                                                                                  |
-| ----------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--type LIST`                 | Chat types                                      | `group` means the whole group family: a legacy group, a supergroup and a broadcast group. Also `supergroup`, `channel`, `gigagroup`, `monoforum`, `community`. Default: all.           |
-| `-k, --keyword LIST`          | Title or username contains a word               | Case insensitive. Comma separated.                                                                                                                                                     |
-| `-K, --any LIST`              | Same as `--keyword`                             | Kept for readability in scripts. `--keyword a,b` is already OR.                                                                                                                        |
-| `--not LIST`                  | Title or username contains none of these        | Applies to title and username.                                                                                                                                                         |     | `--group LIST` | The fields of saved groups, folded in | Comma separated names from `~/.config/chaff-tg/groups.json`. See [groups](#groups). Words union with `--keyword`; a typed flag beats a group value. `check` accepts it and ignores it, the same way it ignores `--keyword`. |     | `-r, --regex PATTERN` | Title matches a regular expression | Case insensitive, applied after the keyword filters. |
-| `--id LIST`                   | Exactly these ids                               | Use the ids from `chaff list --json`.                                                                                                                                                  |
-| `--muted`, `--not-muted`      | Mute state                                      | `--muted` means you muted it. A chat on the account default is neither.                                                                                                                |
-| `--archived`, `--no-archived` | Archive state                                   | Archived chats are always gathered, so both directions work.                                                                                                                           |
-| `--inactive-days N`           | No message for N days or more                   | An empty chat counts as inactive.                                                                                                                                                      |
-| `--members RANGE`             | Member count inside a range, for example `0-50` | A missing count is excluded, never treated as zero. This is why `--members 0-0` cannot find a banned chat.                                                                             |
-| `--scam`, `--fake`            | Telegram's own flags                            | Set on the chat by Telegram, not by you.                                                                                                                                               |
-| `--banned`                    | Telegram returned the chat as forbidden         | You are banned from it, or it was removed. Rare in a listing: see [`check`](#check).                                                                                                   |
-| `--unavailable`               | Telegram no longer lists it as available        | Wider than `--banned`: also a group you left or a channel you are no longer in.                                                                                                        |
-| `--unread`, `--read`          | Telegram's own unread rule                      | A chat is unread when it is marked unread, or when it holds more than one unread message. A single unread message does not count, the same way it does not badge a dialog in Telegram. |
-| `--pinned`, `--no-pinned`     | Pin state                                       | Pinned chats are shown but not pre-ticked in the checklist.                                                                                                                            |
-| `--include LIST`              | Force these ids in                              | Survives every other filter.                                                                                                                                                           |
-| `--exclude LIST`              | Never touch these ids                           | Applied last and wins over everything, including `--include` and the checklist.                                                                                                        |
-| `--limit N`                   | Stop gathering after N chats                    | A pagination guard for a large account, not a print limit.                                                                                                                             |
+| Flag                          | Matches                                         | Notes                                                                                                                                                                                                                       |
+| ----------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--type LIST`                 | Chat types                                      | `group` means the whole group family: a legacy group, a supergroup and a broadcast group. Also `supergroup`, `channel`, `gigagroup`, `monoforum`, `community`. Default: all.                                                |
+| `-k, --keyword LIST`          | Title or username contains a word               | Case insensitive. Comma separated.                                                                                                                                                                                          |
+| `-K, --any LIST`              | Same as `--keyword`                             | Kept for readability in scripts. `--keyword a,b` is already OR.                                                                                                                                                             |
+| `--not LIST`                  | Title or username contains none of these        | Applies to title and username.                                                                                                                                                                                              |
+| `--group LIST`                | The fields of saved groups, folded in           | Comma separated names from `~/.config/chaff-tg/groups.json`. See [groups](#groups). Words union with `--keyword`; a typed flag beats a group value. `check` accepts it and ignores it, the same way it ignores `--keyword`. |
+| `-r, --regex PATTERN`         | Title matches a regular expression              | Case insensitive, applied after the keyword filters.                                                                                                                                                                        |
+| `--id LIST`                   | Exactly these ids                               | Use the ids from `chaff list --json`.                                                                                                                                                                                       |
+| `--muted`, `--not-muted`      | Mute state                                      | `--muted` means you muted it. A chat on the account default is neither.                                                                                                                                                     |
+| `--archived`, `--no-archived` | Archive state                                   | Archived chats are always gathered, so both directions work.                                                                                                                                                                |
+| `--inactive-days N`           | No message for N days or more                   | An empty chat counts as inactive.                                                                                                                                                                                           |
+| `--members RANGE`             | Member count inside a range, for example `0-50` | A missing count is excluded, never treated as zero. This is why `--members 0-0` cannot find a banned chat.                                                                                                                  |
+| `--scam`, `--fake`            | Telegram's own flags                            | Set on the chat by Telegram, not by you.                                                                                                                                                                                    |
+| `--banned`                    | Telegram returned the chat as forbidden         | You are banned from it, or it was removed. Rare in a listing: see [`check`](#check).                                                                                                                                        |
+| `--unavailable`               | Telegram no longer lists it as available        | Wider than `--banned`: also a group you left or a channel you are no longer in.                                                                                                                                             |
+| `--unread`, `--read`          | Telegram's own unread rule                      | A chat is unread when it is marked unread, or when it holds more than one unread message. A single unread message does not count, the same way it does not badge a dialog in Telegram.                                      |
+| `--pinned`, `--no-pinned`     | Pin state                                       | Pinned chats are shown but not pre-ticked in the checklist.                                                                                                                                                                 |
+| `--include LIST`              | Force these ids in                              | Survives every other filter.                                                                                                                                                                                                |
+| `--exclude LIST`              | Never touch these ids                           | Applied last and wins over everything, including `--include` and the checklist.                                                                                                                                             |
+| `--limit N`                   | Stop gathering after N chats                    | A pagination guard for a large account, not a print limit.                                                                                                                                                                  |
 
 Two filters are worth spelling out because they surprise people:
 

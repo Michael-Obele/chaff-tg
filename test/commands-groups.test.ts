@@ -119,7 +119,8 @@ describe("chaff groups (read)", () => {
     expect(result.code).toBe(EXIT.OK);
     expect(result.stdout.text()).toContain("junk");
     expect(result.stdout.text()).toContain("keyword:amazon|voucher");
-    expect(result.stdout.text()).toContain("scam");
+    // A switch prints bare in the table, so `scam:true` must not appear here.
+    expect(result.stdout.text()).toMatch(/scam(?!:)/);
     expect(result.stdout.text()).toContain("inactiveDays:365");
   });
 
@@ -403,5 +404,42 @@ describe("chaff groups (arity)", () => {
     expect(result.code).toBe(EXIT.USAGE);
     expect(result.stderr.text()).toContain("groups add junk needs at least one word");
     expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("set refuses a field a group cannot hold, by name, and writes nothing", async () => {
+    const { env, path } = withGroups({});
+    const result = await run(["groups", "set", "junk", "--scam", "--exclude", "-1001"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain('"exclude" is not allowed in a group');
+    expect(loadGroups(path)).toEqual({});
+  });
+
+  test("set catches the ids flag even though the field is named ids", async () => {
+    const { env, path } = withGroups({});
+    const result = await run(["groups", "set", "junk", "--id", "-1001"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain('"ids" is not allowed in a group');
+    expect(loadGroups(path)).toEqual({});
+  });
+
+  test("set refuses to fold in another group", async () => {
+    const { env, path } = withGroups({ other: { scam: true } });
+    const result = await run(["groups", "set", "junk", "--group", "other", "--scam"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("does not fold in other groups");
+    expect(loadGroups(path)).toEqual({ other: { scam: true } });
+  });
+
+  test("a bad group is refused before any client opens", async () => {
+    const { root, env } = fakeEnv({ CHAFF_FAKE: undefined, CHAFF_FIXTURE: undefined });
+    roots.push(root);
+    const path = resolvePaths(env).groupsPath();
+    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(path, "{ not json");
+    const result = await run(["list", "--group", "junk"], env);
+    // Without the ordering fix this is exit 3 (not logged in): the client opens
+    // first and the groups file is never reached.
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups file at");
   });
 });

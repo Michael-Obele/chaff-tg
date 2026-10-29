@@ -72,7 +72,7 @@ export type GroupKey = (typeof GROUP_KEYS)[number];
  * Refused by name, not dropped: a file that holds one is a user who meant
  * something, and the answer is to say so. See the header.
  */
-const FORBIDDEN_KEYS = ["ids", "include", "exclude", "limit"] as const;
+export const FORBIDDEN_KEYS = ["ids", "include", "exclude", "limit"] as const;
 
 /** The fields whose lists widen the net when two sources both set them. */
 export const UNION_KEYS: readonly GroupKey[] = ["types", "keyword", "any", "not"];
@@ -517,7 +517,7 @@ export function dropGroup(groups: Groups, name: string): Groups {
 }
 
 /** The message for a key handed to `set` that a group may not hold. */
-function forbiddenKeyMessage(key: string): string {
+export function forbiddenKeyMessage(key: string): string {
   return (
     `"${key}" is not allowed in a group. A group holds ${GROUP_KEYS.join(", ")}. ` +
     `It cannot hold ${FORBIDDEN_KEYS.join(", ")}: those name particular chats or cap one run, ` +
