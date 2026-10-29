@@ -213,10 +213,10 @@ export async function createClient(opts: ClientOptions): Promise<TelegramClientL
   // sink every child logger ends up in, so setting it once covers the network,
   // updates and storage loggers together.
   const sink = opts.log;
-  client.log.mgr.handler = (_color, _level, tag, fmt, args) => {
+  client.log.mgr.handler = (_color, level, tag, fmt, args) => {
     if (sink === undefined) return;
     const rest = args.map(describeLogArgument).join(" ");
-    sink(`${tag}: ${fmt}${rest === "" ? "" : ` ${rest}`}`);
+    sink(`${LOG_LEVEL_NAMES[level] ?? "log"} ${tag}: ${fmt}${rest === "" ? "" : ` ${rest}`}`);
   };
 
   try {
@@ -434,6 +434,14 @@ function asNumber(value: unknown): number | null {
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
+
+/**
+ * `LogManager`'s level numbers, in order (`utils/logger.js:98-103`), so a
+ * forwarded line says whether it was a warning or a verbose note. The numbers
+ * are the library's, not ours, which is why this is a list indexed by level
+ * rather than a switch over an enum.
+ */
+const LOG_LEVEL_NAMES = ["off", "error", "warn", "info", "debug", "verbose"] as const;
 
 /**
  * One argument of a library log line, as text.
