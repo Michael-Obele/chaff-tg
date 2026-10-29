@@ -404,19 +404,39 @@ Found 1 chats
 -1001  channel  Signal Room  signalroom     4821  2024-08-02  muted unread:412 scam
 ```
 
-| Verb     | Arguments                                      | Does                                                                                    |
-| -------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `list`   | none                                           | Every group and the fields it sets. This is what a bare `chaff groups` runs.            |
-| `show`   | one, the name                                  | One group, one field per line.                                                          |
-| `add`    | two, the name and a comma separated word list  | Unions the words into the group's `keyword`, creating the group when the name is new.   |
-| `remove` | two                                            | Drops those words from `keyword`. Words that are not there are ignored.                 |
-| `set`    | one, the name, plus any filter flags           | Writes exactly the fields you typed, replacing those fields and leaving the rest alone. |
-| `unset`  | two, the name and a comma separated field list | Removes those fields.                                                                   |
-| `drop`   | one, the name                                  | Deletes the group.                                                                      |
+| Verb     | Arguments                                      | Does                                                                                            |
+| -------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `list`   | none                                           | Every group and the fields it sets. This is what a bare `chaff groups` runs.                    |
+| `show`   | one, the name                                  | One group, one field per line.                                                                  |
+| `add`    | two, the name and a comma separated word list  | Unions the words into the group's `keyword`, creating the group when the name is new.           |
+| `remove` | two                                            | Drops those words from `keyword`. Words that are not there are ignored.                         |
+| `set`    | one, the name, plus any filter flags           | Writes exactly the fields you typed, replacing those fields and leaving the rest alone.         |
+| `unset`  | two, the name and a comma separated field list | Removes those fields.                                                                           |
+| `check`  | one, the name                                  | Counts what each part of the group actually selects. The only verb here that talks to Telegram. |
+| `drop`   | one, the name                                  | Deletes the group.                                                                              |
 
 `set` takes the filter flags as they are documented under [Filters](#filters), so the line you
 use to try a filter is the line you use to save it, and it inherits their parsing: `chaff groups
 set junk --inactive-days 365 --type channel` stores those two fields and nothing else.
+
+**`check` is the one that needs a session.** Every other verb reads and writes one local file, but
+a count needs your dialogs, so `chaff groups check junk` opens a client like `list` does and can
+answer `not logged in` (exit 3). It lists once and counts every part from that one listing, rather
+than asking Telegram once per word.
+
+```text
+$ chaff groups check junk
+matches nothing on its own: keyword:amazon, keyword:trading, keyword:sports, keyword:betting
+item             value
+group            0 chats
+keyword:amazon   0 chats
+keyword:trading  0 chats
+keyword:sports   0 chats
+keyword:betting  0 chats
+```
+
+That output is the reason it exists. A word that matches nothing changes no total in an obvious
+way, so a typo reads exactly like "you have no such channels". Here it is named.
 
 **What a group may hold.** Any of these 15 fields: `types`, `keyword`, `any`, `not`, `regex`,
 `muted`, `archived`, `inactiveDays`, `members`, `scam`, `fake`, `banned`, `unavailable`, `unread`,
@@ -762,6 +782,9 @@ Point `CHAFF_FAKE_FAILURES` at a chat to rehearse the failure and flood paths.
 | `not logged in: there is no session file at …` (exit 3)       | Run `chaff login`, or check `chaff doctor` for the path it looked at.                                                                                                  |
 | `Found 0 chats`                                               | Filters are ANDed, so one narrow flag empties the list. Start from `chaff list` with no filters and add one at a time.                                                 |
 | `--group` finds nothing, or names a group you thought you had | The name is matched exactly, and `chaff groups` prints the names you have. A group that sets several fields ANDs them, so a `scam` group plus `--muted` asks for both. |
+| `groups set` with no flags                                    | The verb needs at least one filter flag. Pass one, for example `chaff groups set junk --scam`.                                                                         |
+| A `[WRN]` line from the library                               | Telegram or the library reported something worth knowing, such as a flood wait it is retrying. It goes to stderr, so `--json` on stdout stays parseable.               |
+| A `[WRN]` line from the library                               | Telegram or the library reported something worth knowing, such as a flood wait it is retrying. It goes to stderr, so `--json` on stdout stays parseable.               |
 | `--type group` returns nothing                                | It should not: `group` includes supergroups. Check the other filters, and check `--muted`, since most junk is muted rather than unmuted.                               |
 | `list --banned` returns nothing                               | Expected. Telegram removes banned chats from your dialog list. Use `chaff check` with the ids instead.                                                                 |
 | The checklist appears even though `--yes` was passed          | A terminal is attached. `--select` is the way to skip the checklist on purpose.                                                                                        |

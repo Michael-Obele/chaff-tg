@@ -158,6 +158,10 @@ export async function openClient(ctx: CommandContext): Promise<OpenedClient> {
       // logged in" for the user to fix, not a prompt to answer mid-run — and with
       // no terminal attached it would be a prompt nobody could ever answer.
       interactive: false,
+      // mtcute logs to stdout by default, and stdout belongs to the payload
+      // under `--json`. Its warnings are worth reading, so they go to stderr
+      // through the channel that always reaches stderr.
+      log: (line) => ctx.out.error(`${line}\n`),
     });
   } catch (error) {
     if (classify(error).kind === "network") throw error;

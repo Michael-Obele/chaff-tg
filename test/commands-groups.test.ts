@@ -443,3 +443,59 @@ describe("chaff groups (arity)", () => {
     expect(result.stderr.text()).toContain("groups file at");
   });
 });
+
+describe("chaff groups check", () => {
+  test("counts the group and each of its parts", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal", "airdrop"], scam: true } });
+    const result = await run(["groups", "check", "junk"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(result.stdout.text()).toContain("group");
+    expect(result.stdout.text()).toContain("keyword:signal");
+    expect(result.stdout.text()).toContain("keyword:airdrop");
+    expect(result.stdout.text()).toContain("scam");
+  });
+
+  test("a word that matches nothing is called out, which is the whole point", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal", "cryto"] } });
+    const result = await run(["groups", "check", "junk"], env);
+    expect(result.code).toBe(EXIT.OK);
+    expect(result.stdout.text()).toContain("keyword:cryto");
+    expect(result.stdout.text()).toContain("matches nothing on its own: keyword:cryto");
+  });
+
+  test("--json carries the counts, not the rendering", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal", "cryto"] } });
+    const result = await run(["groups", "check", "junk", "--json"], env);
+    expect(result.code).toBe(EXIT.OK);
+    const doc = JSON.parse(result.stdout.text()) as {
+      name: string;
+      total: number;
+      parts: { key: string; count: number }[];
+    };
+    expect(doc.name).toBe("junk");
+    expect(typeof doc.total).toBe("number");
+    expect(doc.parts).toContainEqual({ key: "keyword:cryto", count: 0 });
+  });
+
+  test("needs a group name", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal"] } });
+    const result = await run(["groups", "check"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups check needs a group name");
+  });
+
+  test("refuses a name that is not there, without a Telegram request", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal"] } });
+    const result = await run(["groups", "check", "nope"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("no group named");
+  });
+
+  test("is the one groups verb that needs a session", async () => {
+    const { env, root } = withGroups({ junk: { keyword: ["signal"] } });
+    void root;
+    const loggedOut = { ...env, CHAFF_FAKE: undefined, CHAFF_FIXTURE: undefined };
+    const result = await run(["groups", "check", "junk"], loggedOut);
+    expect(result.code).toBe(EXIT.NOT_LOGGED_IN);
+  });
+});

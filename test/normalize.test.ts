@@ -19,6 +19,7 @@
 import { describe, expect, test } from "bun:test";
 import { EXIT, classify } from "../src/core/errors";
 import {
+  describeLogArgument,
   normalizeDialog,
   TelegramApi,
   type RawDialog,
@@ -420,5 +421,23 @@ describe("the fake client's failure script", () => {
     });
     await client.leaveChat(-1005);
     expect(client.left).toEqual([-1005]);
+  });
+});
+
+describe("describeLogArgument", () => {
+  test("a string passes through, an Error keeps its message", () => {
+    expect(describeLogArgument("flood wait")).toBe("flood wait");
+    expect(describeLogArgument(new Error("Session is reset"))).toBe("Error: Session is reset");
+  });
+
+  test("a plain object is JSON, not [object Object]", () => {
+    expect(describeLogArgument({ retryIn: 5 })).toBe('{"retryIn":5}');
+  });
+
+  test("nothing in it can throw", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => describeLogArgument(circular)).not.toThrow();
+    expect(describeLogArgument(circular)).toBe("[object Object]");
   });
 });

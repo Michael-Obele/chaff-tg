@@ -11,6 +11,7 @@
  * `--group` will actually use.
  */
 import { EXIT } from "../../core/errors";
+import { filterRecords } from "../../core/filters";
 import {
   addWords,
   dropGroup,
@@ -25,7 +26,9 @@ import {
   unsetFields,
 } from "../../core/groups";
 import { resolvePaths } from "../../core/session";
-import { words } from "../args";
+import type { ChatRecord } from "../../core/types";
+import { emptyFilters, words } from "../args";
+import { openClient } from "../client";
 import { fragmentFromArgs } from "../groups";
 import type { Command, CommandContext } from "../index";
 import type { Column, Table } from "../render/columns";
@@ -207,6 +210,84 @@ function wordVerb(
   return guarded(ctx, path, () => change(groups, parsed.name, list), message(parsed.name, list));
 }
 
+/**
+ * `groups check NAME`: how many chats each part of a group actually selects.
+ *
+ * The only verb here that talks to Telegram, because a count needs the dialogs.
+ * That makes it the only one that can answer "not logged in" (exit 3), and the
+ * only one `CHAFF_FAKE` matters for.
+ *
+ * Every number comes from `filterRecords`, the same engine `--group` uses, so a
+ * preview cannot disagree with the run it is previewing. Counting is one pass
+ * over one listing: asking Telegram once per word would be cheaper to write and
+ * would earn a flood wait, which is how this command came to be wanted.
+ */
+async function checkGroup(
+  ctx: CommandContext,
+  name: string,
+  fragment: GroupFilter,
+): Promise<number> {
+  const { api } = await openClient(ctx);
+  try {
+    const records: ChatRecord[] = [];
+    for await (const chat of api.dialogs({})) records.push(chat);
+
+    /** How many chats this patch alone selects, through the real engine. */
+    const countWith = (patch: GroupFilter): number =>
+      filterRecords(records, { ...emptyFilters(), ...patch }, ctx.now()).filter((row) => row.ok)
+        .length;
+
+    const rows: [string, string][] = [];
+    const parts: { key: string; count: number }[] = [];
+    const dead: string[] = [];
+
+    const total = countWith(fragment);
+    rows.push(["group", plural(total)]);
+    parts.push({ key: "group", count: total });
+
+    for (const key of GROUP_KEYS) {
+      const value = fragment[key];
+      if (value === undefined) continue;
+
+      // Word lists are reported word by word: one word that matches nothing is
+      // invisible in the total, and invisible is exactly what a typo looks like.
+      if ((key === "keyword" || key === "any" || key === "not") && Array.isArray(value)) {
+        for (const word of value) {
+          // `not` inverts, so its honest number is how many chats it would
+          // exclude, which is the same test as "contains this word".
+          const hit =
+            key === "not"
+              ? countWith({ keyword: [word] })
+              : countWith({ [key]: [word] } as GroupFilter);
+          const label = `${key}:${word}`;
+          rows.push([label, key === "not" ? `${plural(hit)} excluded` : plural(hit)]);
+          parts.push({ key: label, count: hit });
+          if (hit === 0) dead.push(label);
+        }
+        continue;
+      }
+
+      const hit = countWith({ [key]: value } as GroupFilter);
+      rows.push([key, plural(hit)]);
+      parts.push({ key, count: hit });
+      if (hit === 0) dead.push(key);
+    }
+
+    if (dead.length > 0) {
+      ctx.out.note(`matches nothing on its own: ${dead.join(", ")}\n`);
+    }
+    ctx.out.document({ json: { name, total, parts }, table: factsTable(rows) });
+    return EXIT.OK;
+  } finally {
+    await api.destroy();
+  }
+}
+
+/** `1 chat`, `2 chats`. */
+function plural(count: number): string {
+  return `${count} chat${count === 1 ? "" : "s"}`;
+}
+
 export const groupsCommand: Command = {
   name: "groups",
   summary: "List, edit and reuse your saved filter groups",
@@ -223,6 +304,16 @@ export const groupsCommand: Command = {
           return EXIT.USAGE;
         }
         return render(ctx, rowsOf(groups));
+      }
+      case "check": {
+        const parsed = parseWrite(ctx, "check", rest, false);
+        if (parsed === null) return EXIT.USAGE;
+        const fragment = groups[parsed.name];
+        if (fragment === undefined) {
+          ctx.out.error(`no group named ${JSON.stringify(parsed.name)}. ${knownList(groups)}\n`);
+          return EXIT.USAGE;
+        }
+        return checkGroup(ctx, parsed.name, fragment);
       }
       case "show": {
         const name = rest[0];
@@ -310,7 +401,7 @@ export const groupsCommand: Command = {
       default:
         ctx.out.error(
           `unknown groups verb ${JSON.stringify(verb)}. ` +
-            "Use show, add, remove, set, unset, drop.\n",
+            "Use show, add, remove, set, unset, drop, check.\n",
         );
         return EXIT.USAGE;
     }

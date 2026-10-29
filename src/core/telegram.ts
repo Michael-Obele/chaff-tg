@@ -156,6 +156,20 @@ export interface ClientOptions {
    * forever for an answer that can never arrive.
    */
   interactive: boolean;
+  /**
+   * Where the library's own log lines go, or `undefined` to drop them.
+   *
+   * mtcute logs with `console.log`, which is stdout, and stdout is the channel a
+   * machine format owns. One library warning is enough to make
+   * `chaff list --json` unparseable: measured, a `messages.getDialogs` flood
+   * wait put its line ahead of the JSON object, and every `jq` downstream broke.
+   *
+   * The sink is injected rather than written to here, because the core never
+   * prints (plan/architecture.md, "Repo layout"). A caller that passes nothing
+   * loses the library's chatter, which is the honest default for a library: the
+   * front end decides what a user sees.
+   */
+  log?: (line: string) => void;
 }
 
 /**
@@ -194,6 +208,16 @@ export async function createClient(opts: ClientOptions): Promise<TelegramClientL
     apiHash: opts.apiHash,
     storage: opts.sessionPath,
   });
+
+  // Take the library's log away from stdout. `LogManager.handler` is the single
+  // sink every child logger ends up in, so setting it once covers the network,
+  // updates and storage loggers together.
+  const sink = opts.log;
+  client.log.mgr.handler = (_color, _level, tag, fmt, args) => {
+    if (sink === undefined) return;
+    const rest = args.map(describeLogArgument).join(" ");
+    sink(`${tag}: ${fmt}${rest === "" ? "" : ` ${rest}`}`);
+  };
 
   try {
     await client.start(
@@ -409,6 +433,26 @@ function asNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+/**
+ * One argument of a library log line, as text.
+ *
+ * mtcute logs things like `messages.getDialogs resulted in a flood wait` with
+ * an occasional `Error` mixed in. `String(error)` is `Error: message`, which
+ * reads fine; `String({…})` is `[object Object]`, which does not, so plain
+ * objects fall back to JSON and anything unreadable degrades to its string form
+ * rather than throwing inside a logger.
+ */
+export function describeLogArgument(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return `Error: ${value.message}`;
+  if (value === null || typeof value !== "object") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /**
