@@ -64,3 +64,20 @@ export {
   sessionExists,
 } from "./session";
 export type { Paths } from "./session";
+
+//
+// Local state: the named filter groups file behind `--group`
+// (plan/groups.md). One file beside the config, serving every session.
+//
+export {
+  checkGroupName,
+  GROUP_KEYS,
+  GROUPS_VERSION,
+  GroupsError,
+  loadGroups,
+  parseGroups,
+  saveGroups,
+  thinGroup,
+  UNION_KEYS,
+} from "./groups";
+export type { GroupFilter, GroupKey, Groups, GroupsErrorCode } from "./groups";

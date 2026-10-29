@@ -141,7 +141,7 @@ export const planSchema = v.object({
 });
 
 /** Keep only the fields that are set, in `Filters` declaration order. */
-function setFilters(f: Partial<Filters>): Partial<Filters> {
+export function setFilters(f: Partial<Filters>): Partial<Filters> {
   const out: Partial<Filters> = {};
   if (f.types != null) out.types = f.types;
   if (f.keyword != null && f.keyword.length > 0) out.keyword = f.keyword;

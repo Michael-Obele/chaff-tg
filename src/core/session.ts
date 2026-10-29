@@ -52,6 +52,9 @@ const SESSION_SUFFIX = ".session";
 /** The journal database: one per data directory, shared by its sessions. */
 const JOURNAL_FILE = "journal.db";
 
+/** The named filter groups file, beside the config file (`src/core/groups.ts`). */
+const GROUPS_FILE = "groups.json";
+
 /** The files SQLite leaves beside a database, which a logout has to take too. */
 const SQLITE_SIBLINGS = ["-wal", "-shm", "-journal"] as const;
 
@@ -72,6 +75,14 @@ export interface Paths {
    * directory, so `chaff logout` has exactly one file to remove.
    */
   journalPath(): string;
+  /**
+   * The named filter groups file: `<configDir>/groups.json`
+   * (src/core/groups.ts, plan/groups.md). It sits with the config file rather
+   * than with the session and the journal because a group is how the user
+   * thinks about their chats, not a record of one account's runs: one file
+   * serves every session, and `chaff logout` leaves it alone.
+   */
+  groupsPath(): string;
 }
 
 /** The home directory to fall back to, ignoring a relative or blank `HOME`. */
@@ -148,6 +159,7 @@ export function resolvePaths(
     configPath: join(configDir, "config.json"),
     sessionPath: (name) => join(dataDir, `${safeName(name)}${SESSION_SUFFIX}`),
     journalPath: () => join(dataDir, JOURNAL_FILE),
+    groupsPath: () => join(configDir, GROUPS_FILE),
   };
 }
 
