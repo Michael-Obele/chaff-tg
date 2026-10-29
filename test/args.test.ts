@@ -675,9 +675,8 @@ describe("positionals", () => {
     );
   });
 
-  test("groups refuses a fourth token by name and number", () => {
-    expect(() => parseArgs(["groups", "add", "deals", "extra", "more"])).toThrow(
-      /groups takes at most 3 words/,
-    );
+  test("groups collects every bare token and leaves arity to the command", () => {
+    const args = parseArgs(["groups", "add", "deals", "a,b", "extra", "more"]);
+    expect(args.positional).toEqual(["add", "deals", "a,b", "extra", "more"]);
   });
 });

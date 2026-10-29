@@ -107,9 +107,10 @@ export interface ParsedArgs {
    */
   groupNames: string[];
   /**
-   * Bare tokens after the command word. Only the commands named in `POSITIONALS`
-   * accept them, so every other command still refuses a second bare token with
-   * the original message.
+   * Bare tokens after the command word. Only the commands named in
+   * `POSITIONAL_COMMANDS` accept them, so every other command still refuses a
+   * second bare token with the original message. How many a command accepts, and
+   * what it does with them, is that command's own check.
    */
   positional: string[];
   selection: Selection;
@@ -195,13 +196,18 @@ const CHAT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * How many bare tokens each command accepts after its own name. `groups` takes a
- * verb, a name and, for the verbs that need one, a list; the flags a verb may
- * need follow it as flags. Nothing else
- * takes any, which keeps `chaff list foo` a usage error rather than a silently
- * ignored word.
+ * Which commands accept bare tokens after their own name. `groups` does: it has
+ * verbs, a name, and for some verbs a list.
+ *
+ * How many is the command's business, not the parser's. The parser cannot know
+ * that `show` wants one token and `add` wants two, so a cap here would refuse a
+ * stray word with a message that counts words instead of one that names the
+ * verb and says what that verb wanted.
+ *
+ * Every other command takes none, which keeps `chaff list foo` a usage error
+ * rather than a silently ignored word.
  */
-const POSITIONALS: Readonly<Record<string, number>> = { groups: 3 };
+const POSITIONAL_COMMANDS: ReadonlySet<string> = new Set(["groups"]);
 
 /**
  * What `--type group` means: the whole group family, not the legacy spelling.
@@ -843,16 +849,11 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         command = token;
         continue;
       }
-      const max = POSITIONALS[command];
-      if (max !== undefined && builder.positional.length < max) {
+      if (POSITIONAL_COMMANDS.has(command)) {
         builder.positional.push(token);
         continue;
       }
-      throw new UsageError(
-        max === undefined
-          ? `unexpected argument ${JSON.stringify(token)}; chaff takes one command`
-          : `${command} takes at most ${max} words after it, got ${JSON.stringify(token)}`,
-      );
+      throw new UsageError(`unexpected argument ${JSON.stringify(token)}; chaff takes one command`);
     }
 
     const equals = token.indexOf("=");

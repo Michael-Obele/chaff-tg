@@ -151,6 +151,14 @@ function parseWrite(
   needsList: boolean,
 ): { name: string; list: string } | null {
   const [name, list] = rest;
+  if (rest.length > (needsList ? 2 : 1)) {
+    ctx.out.error(
+      needsList
+        ? `groups ${verb} takes exactly two arguments (the group name and the list), got ${JSON.stringify(rest[2])}\n`
+        : `groups ${verb} takes exactly one argument (the group name), got ${JSON.stringify(rest[1])}\n`,
+    );
+    return null;
+  }
   if (name === undefined) {
     ctx.out.error(
       needsList
@@ -176,12 +184,23 @@ export const groupsCommand: Command = {
     const groups = loadGroups(path);
 
     switch (verb ?? "list") {
-      case "list":
+      case "list": {
+        if (rest.length > 0) {
+          ctx.out.error(`groups list takes no arguments, got ${JSON.stringify(rest[0])}\n`);
+          return EXIT.USAGE;
+        }
         return render(ctx, rowsOf(groups));
+      }
       case "show": {
         const name = rest[0];
         if (name === undefined) {
           ctx.out.error("groups show needs a group name\n");
+          return EXIT.USAGE;
+        }
+        if (rest.length > 1) {
+          ctx.out.error(
+            `groups show takes exactly one argument (the group name), got ${JSON.stringify(rest[1])}\n`,
+          );
           return EXIT.USAGE;
         }
         const fragment = groups[name];
@@ -243,6 +262,10 @@ export const groupsCommand: Command = {
         const parsed = parseWrite(ctx, "unset", rest, true);
         if (parsed === null) return EXIT.USAGE;
         const keys = words(parsed.list);
+        if (keys.length === 0) {
+          ctx.out.error(`groups unset ${parsed.name} needs at least one word\n`);
+          return EXIT.USAGE;
+        }
         return guarded(
           ctx,
           path,

@@ -322,3 +322,67 @@ describe("chaff groups (write)", () => {
     expect(readFileSync(path, "utf8")).toBe(before);
   });
 });
+
+describe("chaff groups (arity)", () => {
+  test("list with an extra token is exit 2", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal"] } });
+    const result = await run(["groups", "list", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups list");
+    expect(result.stderr.text()).toContain("takes no");
+  });
+
+  test("show with an extra token is exit 2", async () => {
+    const { env } = withGroups({ junk: { keyword: ["signal"] } });
+    const result = await run(["groups", "show", "junk", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups show");
+    expect(result.stderr.text()).toContain("exactly one");
+  });
+
+  test("drop with an extra token is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "drop", "junk", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups drop");
+    expect(result.stderr.text()).toContain("exactly one");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("add with an extra token is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "add", "junk", "signal,airdrop", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups add");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("remove with an extra token is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal", "airdrop"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "remove", "junk", "airdrop", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups remove");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("unset with an extra token is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal"], scam: true } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "unset", "junk", "scam", "extra"], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups unset");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  test("unset with an empty list is exit 2 and writes nothing", async () => {
+    const { env, path } = withGroups({ junk: { keyword: ["signal"] } });
+    const before = readFileSync(path, "utf8");
+    const result = await run(["groups", "unset", "junk", ""], env);
+    expect(result.code).toBe(EXIT.USAGE);
+    expect(result.stderr.text()).toContain("groups unset junk needs at least one word");
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+});
