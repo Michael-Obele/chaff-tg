@@ -7,14 +7,23 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  addWords,
   checkGroupName,
+  dropGroup,
   GROUPS_VERSION,
   GroupsError,
   loadGroups,
+  mergeGroups,
   parseGroups,
+  removeWords,
   saveGroups,
+  setFields,
   thinGroup,
+  unsetFields,
+  type GroupFilter,
+  type Groups,
 } from "../src/core/groups";
+import { emptyFilters } from "../src/cli/args";
 import { resolvePaths } from "../src/core/session";
 import type { Filters } from "../src/core/types";
 
@@ -154,5 +163,157 @@ describe("loadGroups and saveGroups", () => {
     const dir = tempDir();
     writeFileSync(join(dir, "groups.json"), "[]");
     expect(() => loadGroups(join(dir, "groups.json"))).toThrow(/is malformed/);
+  });
+});
+
+/** A complete `Filters` at "nothing set", from the parser's own defaults. */
+function unset(overrides: Partial<Filters> = {}): Filters {
+  return { ...emptyFilters(), ...overrides };
+}
+
+/** The flag spellings a typed `Filters` carries, as `provided` would. */
+function provided(...flags: string[]): Set<string> {
+  return new Set(flags);
+}
+
+describe("mergeGroups", () => {
+  const groups: Groups = {
+    deals: { keyword: ["amazon"], inactiveDays: 30 },
+    betting: { keyword: ["bet"], types: ["channel"] },
+    wide: { inactiveDays: 365 },
+  };
+
+  test("a group's fields land in the filter set as if typed", () => {
+    expect(mergeGroups(groups, ["deals"], unset(), provided())).toEqual(
+      unset({ keyword: ["amazon"], inactiveDays: 30 }),
+    );
+  });
+
+  test("two groups union their lists", () => {
+    const merged = mergeGroups(groups, ["deals", "betting"], unset(), provided());
+    expect(merged.keyword).toEqual(["amazon", "bet"]);
+    expect(merged.types).toEqual(["channel"]);
+  });
+
+  test("typed words append after the group's, deduped case-insensitively", () => {
+    const merged = mergeGroups(
+      { a: { keyword: ["Amazon"] } },
+      ["a"],
+      unset({ keyword: ["amazon", "vip"] }),
+      provided("keyword"),
+    );
+    expect(merged.keyword).toEqual(["Amazon", "vip"]);
+  });
+
+  test("a typed flag beats the group's value", () => {
+    const merged = mergeGroups(
+      groups,
+      ["deals"],
+      unset({ inactiveDays: 7 }),
+      provided("inactive-days"),
+    );
+    expect(merged.inactiveDays).toBe(7);
+  });
+
+  test("a group beats the unset default", () => {
+    const merged = mergeGroups(groups, ["deals"], unset(), provided());
+    expect(merged.inactiveDays).toBe(30);
+  });
+
+  test("two groups that disagree on a scalar are an error naming both", () => {
+    let message = "";
+    try {
+      mergeGroups(
+        { ...groups, wide: { inactiveDays: 365 } },
+        ["deals", "wide"],
+        unset(),
+        provided(),
+      );
+    } catch (error) {
+      message = (error as GroupsError).message;
+    }
+    expect(message).toContain("inactive-days");
+    expect(message).toContain("deals");
+    expect(message).toContain("wide");
+    expect(message).toContain("30");
+    expect(message).toContain("365");
+  });
+
+  test("two groups that agree are not a disagreement", () => {
+    const same = { a: { inactiveDays: 30 }, b: { inactiveDays: 30 } };
+    expect(mergeGroups(same, ["a", "b"], unset(), provided()).inactiveDays).toBe(30);
+  });
+
+  test("a boolean left false by a second group does not conflict", () => {
+    const pair = { a: { scam: true }, b: { scam: false } };
+    expect(mergeGroups(pair, ["a", "b"], unset(), provided()).scam).toBe(true);
+  });
+
+  test("a negated spelling counts as the command line speaking for the field", () => {
+    const merged = mergeGroups(groups, ["deals"], unset({ muted: false }), provided("not-muted"));
+    expect(merged.muted).toBe(false);
+  });
+
+  test("an unknown name is an error that lists what exists", () => {
+    let message = "";
+    try {
+      mergeGroups(groups, ["nope"], unset(), provided());
+    } catch (error) {
+      message = (error as GroupsError).message;
+    }
+    expect(message).toContain('no group named "nope"');
+    expect(message).toContain("deals, betting, wide");
+  });
+
+  test("no names returns the typed filters untouched", () => {
+    const typed = unset({ keyword: ["x"] });
+    expect(mergeGroups(groups, [], typed, provided("keyword"))).toBe(typed);
+  });
+});
+
+describe("mutations", () => {
+  test("addWords unions into keyword and creates the group", () => {
+    expect(addWords({}, "deals", ["amazon", "Amazon"])).toEqual({ deals: { keyword: ["amazon"] } });
+  });
+
+  test("removeWords drops words and leaves the group behind", () => {
+    expect(removeWords({ deals: { keyword: ["amazon", "deal"] } }, "deals", ["amazon"])).toEqual({
+      deals: { keyword: ["deal"] },
+    });
+    expect(removeWords({ deals: { keyword: ["amazon"] } }, "deals", ["amazon"])).toEqual({
+      deals: { keyword: [] },
+    });
+  });
+
+  test("setFields replaces only the fields given", () => {
+    const next = setFields({ deals: { keyword: ["amazon"], scam: true } }, "deals", {
+      keyword: ["voucher"],
+    });
+    expect(next.deals).toEqual({ scam: true, keyword: ["voucher"] });
+  });
+
+  test("setFields refuses a forbidden key by name", () => {
+    expect(() => setFields({}, "deals", { exclude: [-1] } as GroupFilter)).toThrow(
+      /not allowed in a group/,
+    );
+  });
+
+  test("unsetFields drops named keys and refuses a name that is not a field", () => {
+    expect(unsetFields({ deals: { keyword: ["amazon"], scam: true } }, "deals", ["scam"])).toEqual({
+      deals: { keyword: ["amazon"] },
+    });
+    expect(() => unsetFields({}, "deals", ["scams"])).toThrow(/unknown field/);
+  });
+
+  test("dropGroup deletes the name and refuses a typo", () => {
+    expect(dropGroup({ a: {}, b: {} }, "a")).toEqual({ b: {} });
+    expect(() => dropGroup({ a: {} }, "z")).toThrow(/no group named/);
+  });
+
+  test("no mutation touches the map it was handed", () => {
+    const before: Groups = { deals: { keyword: ["amazon"] } };
+    addWords(before, "deals", ["voucher"]);
+    setFields(before, "deals", { scam: true });
+    expect(before).toEqual({ deals: { keyword: ["amazon"] } });
   });
 });

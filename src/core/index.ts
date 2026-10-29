@@ -70,14 +70,21 @@ export type { Paths } from "./session";
 // (plan/groups.md). One file beside the config, serving every session.
 //
 export {
+  addWords,
   checkGroupName,
+  dropGroup,
+  FLAG_NAMES,
   GROUP_KEYS,
   GROUPS_VERSION,
   GroupsError,
   loadGroups,
+  mergeGroups,
   parseGroups,
+  removeWords,
   saveGroups,
+  setFields,
   thinGroup,
   UNION_KEYS,
+  unsetFields,
 } from "./groups";
 export type { GroupFilter, GroupKey, Groups, GroupsErrorCode } from "./groups";

@@ -284,3 +284,241 @@ export function saveGroups(path: string, groups: Groups): void {
   const body = JSON.stringify({ version: GROUPS_VERSION, groups }, null, 2);
   writeFileSync(path, `${body}\n`, { mode: 0o644 });
 }
+
+/**
+ * How each field is spelled on the command line, including the negated forms.
+ *
+ * `provided` holds the flag the user actually typed (`src/cli/args.ts`), so
+ * `--not-muted` must count as the command line speaking for `muted`. Without
+ * this table a group's `muted: true` would beat a typed `--not-muted`, which is
+ * the opposite of the precedence rule.
+ */
+export const FLAG_NAMES: Record<GroupKey, readonly string[]> = {
+  types: ["type"],
+  keyword: ["keyword"],
+  any: ["any"],
+  not: ["not"],
+  regex: ["regex"],
+  muted: ["muted", "not-muted"],
+  archived: ["archived", "no-archived"],
+  inactiveDays: ["inactive-days"],
+  members: ["members"],
+  scam: ["scam"],
+  fake: ["fake"],
+  banned: ["banned"],
+  unavailable: ["unavailable"],
+  unread: ["unread", "read"],
+  pinned: ["pinned", "no-pinned"],
+};
+
+/** The four booleans whose `false` is the unset value (`emptyFilters`). */
+const SWITCH_KEYS: readonly GroupKey[] = ["scam", "fake", "banned", "unavailable"];
+
+/** A field a fragment does not actually choose. */
+function isUnset(key: GroupKey, value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return SWITCH_KEYS.includes(key) && value === false;
+}
+
+/** The same two values, for scalars that may be objects (`members`). */
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Keep the first spelling of each entry, in order. */
+function dedupe(items: readonly string[], foldCase: boolean): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const key = foldCase ? item.toLowerCase() : item;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/** The flag names a field answers to. */
+function flagNamesOf(key: GroupKey): readonly string[] {
+  return FLAG_NAMES[key];
+}
+
+/** The message for two groups that chose different values for one field. */
+function conflictMessage(
+  first: string,
+  second: string,
+  key: GroupKey,
+  aValue: unknown,
+  bValue: unknown,
+): string {
+  const flag = flagNamesOf(key)[0];
+  return (
+    `groups "${first}" and "${second}" both set --${flag}, to ${JSON.stringify(aValue)} and ` +
+    `${JSON.stringify(bValue)}; pick one group, or pass --${flag} yourself to decide`
+  );
+}
+
+/** A view of `Filters` that a merge loop can write through. */
+type FilterBag = Record<string, unknown>;
+
+/**
+ * The filters this run should use: what was typed, with every named group
+ * folded in (`plan/groups.md`, "Merge rules").
+ *
+ * Two rules and nothing else. The OR lists (`keyword`, `any`, `not`, `types`)
+ * union, groups first then the command line, because more entries in those
+ * lists means a wider net and that is what `--keyword a,b` already does. Every
+ * other field is chosen by precedence: a typed flag beats a group, a group
+ * beats the unset default. Two groups disagreeing is an error rather than a
+ * tie-break, because "last one wins" is a rule nobody can read off the command
+ * line, and a wrong `inactiveDays` silently changes how much gets left.
+ *
+ * `typed` is the complete `Filters` the parser built and `provided` the flags
+ * the user actually named, so the function can tell "typed 50" from "50 is the
+ * default". With no names it returns `typed` unchanged, without a copy: the
+ * common case costs nothing.
+ */
+export function mergeGroups(
+  groups: Groups,
+  names: readonly string[],
+  typed: Filters,
+  provided: ReadonlySet<string>,
+): Filters {
+  if (names.length === 0) return typed;
+
+  const fromGroups: FilterBag = {};
+  const owner: Partial<Record<GroupKey, string>> = {};
+
+  for (const name of names) {
+    const fragment = groups[name];
+    if (fragment === undefined) {
+      throw new GroupsError("unknown-group", unknownName(groups, name));
+    }
+    for (const key of GROUP_KEYS) {
+      const value = (fragment as unknown as FilterBag)[key];
+      if (isUnset(key, value)) continue;
+
+      if (UNION_KEYS.includes(key)) {
+        const prev = (fromGroups[key] as string[] | undefined) ?? [];
+        fromGroups[key] = dedupe([...prev, ...(value as string[])], key !== "types");
+      } else if (owner[key] === undefined) {
+        owner[key] = name;
+        fromGroups[key] = value;
+      } else if (!sameValue(fromGroups[key], value)) {
+        throw new GroupsError(
+          "conflict",
+          conflictMessage(owner[key] as string, name, key, fromGroups[key], value),
+        );
+      }
+    }
+  }
+
+  const merged = { ...typed } as unknown as FilterBag;
+  for (const key of GROUP_KEYS) {
+    const value = fromGroups[key];
+    if (value === undefined) continue;
+
+    if (UNION_KEYS.includes(key)) {
+      const typedWords = (typed as unknown as FilterBag)[key] as string[] | undefined;
+      merged[key] = dedupe([...(value as string[]), ...(typedWords ?? [])], key !== "types");
+    } else if (!flagNamesOf(key).some((flag) => provided.has(flag))) {
+      merged[key] = value;
+    }
+  }
+  return merged as unknown as Filters;
+}
+
+/** The message for a name that is not in the file, with the names that are. */
+function unknownName(groups: Groups, name: string): string {
+  const known = Object.keys(groups);
+  const list =
+    known.length === 0
+      ? "you have none yet: create one with `chaff groups add NAME word,word`"
+      : `groups you have: ${known.join(", ")}`;
+  return `no group named ${JSON.stringify(name)}. ${list}`;
+}
+
+/** The fragment of one group, or an empty one when the name is new. */
+function fragmentOf(groups: Groups, name: string): GroupFilter {
+  return groups[name] ?? {};
+}
+
+/**
+ * Union words into a group's `keyword`, creating the group when the name is
+ * new. Idempotent, and case-insensitive in both directions: the engine
+ * lowercases both sides (`hit()`, src/core/filters.ts), so `Amazon` and
+ * `amazon` are one word here too.
+ */
+export function addWords(groups: Groups, name: string, words: readonly string[]): Groups {
+  checkGroupName(name);
+  const keyword = dedupe([...(fragmentOf(groups, name).keyword ?? []), ...words], true);
+  return { ...groups, [name]: { ...fragmentOf(groups, name), keyword } };
+}
+
+/**
+ * Drop words from a group. Words that are not there are ignored, so a remove is
+ * idempotent the way an add is. A group left with no words keeps the empty list:
+ * it matches nothing, which is what an empty list means, and deleting the name
+ * is `dropGroup`'s job.
+ */
+export function removeWords(groups: Groups, name: string, words: readonly string[]): Groups {
+  checkGroupName(name);
+  const drop = new Set(words.map((word) => word.toLowerCase()));
+  const keyword = (fragmentOf(groups, name).keyword ?? []).filter(
+    (word) => !drop.has(word.toLowerCase()),
+  );
+  return { ...groups, [name]: { ...fragmentOf(groups, name), keyword } };
+}
+
+/**
+ * Write the given fields as this group's values, replacing those fields and
+ * leaving the rest alone. The fragment is thinned first, so a caller can hand
+ * over a whole `Filters` and only what it actually chose is stored.
+ */
+export function setFields(groups: Groups, name: string, fragment: GroupFilter): Groups {
+  checkGroupName(name);
+  const thin = thinGroup(fragment);
+  for (const key of Object.keys(fragment)) {
+    if (!(GROUP_KEYS as readonly string[]).includes(key)) {
+      throw new GroupsError("forbidden-key", forbiddenKeyMessage(key));
+    }
+  }
+  if (Object.keys(thin).length === 0) {
+    throw new GroupsError("forbidden-key", "groups set needs at least one filter flag");
+  }
+  return { ...groups, [name]: { ...fragmentOf(groups, name), ...thin } };
+}
+
+/** Remove named fields from a group. */
+export function unsetFields(groups: Groups, name: string, keys: readonly string[]): Groups {
+  checkGroupName(name);
+  const next = { ...fragmentOf(groups, name) } as FilterBag;
+  for (const key of keys) {
+    if (!(GROUP_KEYS as readonly string[]).includes(key)) {
+      throw new GroupsError("forbidden-key", `unknown field ${JSON.stringify(key)}`);
+    }
+    delete next[key];
+  }
+  return { ...groups, [name]: next as GroupFilter };
+}
+
+/** Delete a group. A name that is not there is an error: a typo in a delete should say so. */
+export function dropGroup(groups: Groups, name: string): Groups {
+  checkGroupName(name);
+  if (!(name in groups)) throw new GroupsError("unknown-group", unknownName(groups, name));
+  const next: Groups = {};
+  for (const [key, fragment] of Object.entries(groups)) {
+    if (key !== name) next[key] = fragment;
+  }
+  return next;
+}
+
+/** The message for a key handed to `set` that a group may not hold. */
+function forbiddenKeyMessage(key: string): string {
+  return (
+    `"${key}" is not allowed in a group. A group holds ${GROUP_KEYS.join(", ")}. ` +
+    `It cannot hold ${FORBIDDEN_KEYS.join(", ")}: those name particular chats or cap one run, ` +
+    "and `exclude` beats the checklist."
+  );
+}
