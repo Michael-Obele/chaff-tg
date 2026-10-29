@@ -47,6 +47,7 @@ import type { ChatRecord, Plan, PlanChat } from "../../core/types";
 import type { Selection } from "../args";
 import { runChecklist, runConfirm, type ChecklistItem } from "../checklist";
 import { openClient, resolveLocalState, type OpenedClient } from "../client";
+import { applyGroups } from "../groups";
 import { TelegramApi } from "../../core/telegram";
 import type { Command, CommandContext } from "../index";
 
@@ -139,7 +140,13 @@ export const leaveCommand: Command = {
   summary: "Leave the selected chats",
 
   async run(ctx) {
-    const { filters, selection } = ctx.args;
+    const { selection } = ctx.args;
+    // Groups are a filter-time convenience. Under `--from` the manifest already
+    // carries the merged filters, so the names are not read on that path, exactly
+    // as the other filter flags are ignored there. `filters.exclude` still comes
+    // from the command line, and a group cannot hold `exclude`, so the two cannot
+    // interact (plan/groups.md, "The flag").
+    const filters = selection.from === null ? applyGroups(ctx) : ctx.args.filters;
     const delayMs = selection.delayMs;
     let plan: Plan;
     let opened: OpenedClient | null = null;

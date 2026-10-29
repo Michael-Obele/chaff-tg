@@ -46,6 +46,7 @@
 import { dirname, resolve } from "node:path";
 import { EXIT } from "../../core/errors";
 import { ManifestError, parseManifest, serializeManifest } from "../../core/manifest";
+import { applyGroups } from "../groups";
 import { buildPlan } from "../../core/plan";
 import type { ChatRecord, Plan } from "../../core/types";
 import type { Command } from "../index";
@@ -70,7 +71,7 @@ export const reportCommand: Command = {
     if (from === null) {
       const { api, account } = await openClient(ctx);
       try {
-        const filters = ctx.args.filters;
+        const filters = applyGroups(ctx);
         // The cap belongs at the source, as in `list`: the client stops asking
         // Telegram once it has `--limit` dialogs.
         const limit = filters.limit === null ? {} : { limit: filters.limit };

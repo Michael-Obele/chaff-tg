@@ -24,6 +24,7 @@ import { filterRecords } from "../../core/filters";
 import type { ChatRecord } from "../../core/types";
 import type { Command } from "../index";
 import { openClient } from "../client";
+import { applyGroups } from "../groups";
 import type { Column, Table } from "../render/columns";
 import { rowObject } from "../render/json";
 
@@ -106,7 +107,7 @@ export const listCommand: Command = {
   async run(ctx) {
     const { api } = await openClient(ctx);
     try {
-      const filters = ctx.args.filters;
+      const filters = applyGroups(ctx);
       const limit = filters.limit === null ? {} : { limit: filters.limit };
 
       // The cap applies here, at the source: the client stops asking Telegram

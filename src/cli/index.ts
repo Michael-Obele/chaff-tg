@@ -31,6 +31,7 @@
  * codes — the same rule `runLeave` follows, one level up.
  */
 import { ChaffError, EXIT } from "../core/errors";
+import { GroupsError } from "../core/groups";
 import { parseArgs, UsageError, type ParsedArgs } from "./args";
 import { NotLoggedInError } from "./client";
 import { checkCommand } from "./commands/check";
@@ -177,6 +178,7 @@ function messageOf(error: unknown): string {
 function exitCodeOf(error: unknown): number {
   if (error instanceof UsageError) return error.exitCode;
   if (error instanceof NotLoggedInError) return error.exitCode;
+  if (error instanceof GroupsError) return error.exitCode;
   if (error instanceof ChaffError) return error.exitCode;
   return EXIT.ERROR;
 }
