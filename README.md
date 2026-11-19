@@ -113,7 +113,7 @@ values itself.
 Then log in and look before you touch anything:
 
 ```bash
-cp .env.example .env                             # then fill in the two values
+cp web/.env.example .env                         # then fill in the two values
 chaff login                                      # then the code Telegram sends you
 
 chaff list --muted --inactive-days 365           # look first
@@ -227,7 +227,7 @@ Two things to know before you start:
 Copy the template and fill in your own two values:
 
 ```bash
-cp .env.example .env
+cp web/.env.example .env
 $EDITOR .env
 ```
 
@@ -470,7 +470,7 @@ flood and skip paths can be tested without Telegram.
 | `scripts/`     | The test-discovery guard, the release build, and the checksum writer.                                                      |
 | `.github/`     | CI, and the release workflow that publishes on a tag.                                                                      |
 | `install.sh`   | The release installer: detects the platform, verifies sha256, installs to `~/.local/bin`.                                  |
-| `.env.example` | The template for `.env`, which holds your app credentials.                                                                 |
+| `web/.env.example` | The template for `web/.env`, which holds the app credentials and the login gate's secrets. |
 | `docs/`        | The banner and the [command reference](docs/commands.md).                                                                  |
 
 ## Status
