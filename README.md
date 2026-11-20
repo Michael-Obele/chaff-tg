@@ -194,6 +194,11 @@ API development tools. There is no built-in credential on purpose: a shared app 
 everyone's risk on one registration, and the ban would land on your account instead of
 ours.
 
+[docs/telegram-setup.md](docs/telegram-setup.md) is the long version: where each front end
+reads the values, how the web app's two logins fit together (the admin account from
+`web/.env` first, Telegram second), what the login does on the wire, and how to read the
+browser's `[tg]` console trace when a code never arrives.
+
 ### Create your own api_id
 
 Sign in at [my.telegram.org/apps][telegram-api] with the phone number of the account you
@@ -461,17 +466,17 @@ flood and skip paths can be tested without Telegram.
 
 ## Project layout
 
-| Path           | What lives there                                                                                                           |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/`    | The library: types, filters, plan, manifest, journal, session, telegram, pacing, errors. It knows nothing about terminals. |
-| `src/cli/`     | Argument parsing, the commands, the renderers, and the checklist.                                                          |
-| `src/fakes/`   | The offline fake client used by the tests and by `CHAFF_FAKE=1` runs.                                                      |
-| `test/`        | 18 files, 507 tests, no network, fixtures in place of an account.                                                          |
-| `scripts/`     | The test-discovery guard, the release build, and the checksum writer.                                                      |
-| `.github/`     | CI, and the release workflow that publishes on a tag.                                                                      |
-| `install.sh`   | The release installer: detects the platform, verifies sha256, installs to `~/.local/bin`.                                  |
-| `web/.env.example` | The template for `web/.env`, which holds the app credentials and the login gate's secrets. |
-| `docs/`        | The banner and the [command reference](docs/commands.md).                                                                  |
+| Path               | What lives there                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/`        | The library: types, filters, plan, manifest, journal, session, telegram, pacing, errors. It knows nothing about terminals. |
+| `src/cli/`         | Argument parsing, the commands, the renderers, and the checklist.                                                          |
+| `src/fakes/`       | The offline fake client used by the tests and by `CHAFF_FAKE=1` runs.                                                      |
+| `test/`            | 18 files, 507 tests, no network, fixtures in place of an account.                                                          |
+| `scripts/`         | The test-discovery guard, the release build, and the checksum writer.                                                      |
+| `.github/`         | CI, and the release workflow that publishes on a tag.                                                                      |
+| `install.sh`       | The release installer: detects the platform, verifies sha256, installs to `~/.local/bin`.                                  |
+| `web/.env.example` | The template for `web/.env`, which holds the app credentials and the login gate's secrets.                                 |
+| `docs/`            | The banner and the [command reference](docs/commands.md).                                                                  |
 
 ## Status
 
@@ -545,10 +550,11 @@ and never open a socket from `test/`.
 
 ## Documentation
 
-| Document                               | What it holds                                                                                                           |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| [`docs/commands.md`](docs/commands.md) | The command reference: every command, every flag, every exit code, the environment variables, and recipes you can copy. |
-| `plan/` (local, untracked)             | The design record: `cli.md`, `architecture.md`, `safety.md`, `notes.md`.                                                |
+| Document                                           | What it holds                                                                                                               |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/commands.md`](docs/commands.md)             | The command reference: every command, every flag, every exit code, the environment variables, and recipes you can copy.     |
+| [`docs/telegram-setup.md`](docs/telegram-setup.md) | Telegram credentials end to end: creating the app, the two web logins (admin, then Telegram), and the `[tg]` console trace. |
+| `plan/` (local, untracked)                         | The design record: `cli.md`, `architecture.md`, `safety.md`, `notes.md`.                                                    |
 
 The doc comments are the documentation for the code itself. Every file in `src/core/` opens
 with the decision it embodies, in plain sentences, next to the code that makes it. Start

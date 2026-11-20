@@ -2,6 +2,7 @@
   import { toast } from "svelte-sonner";
   import { session } from "#lib/session.svelte";
   import { PHONE } from "#lib/env";
+  import { info, step as trace } from "#lib/log";
 
   let value = $state(PHONE);
 
@@ -37,11 +38,15 @@
   function submit(e: SubmitEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+    trace("form", `submit on the ${step} prompt`, { length: value.trim().length });
     session.answer(value.trim());
     value = "";
   }
 
   async function signIn() {
+    info("form", "Sign in with Telegram clicked", {
+      credentialsReady: session.credentialsReady,
+    });
     const id = toast.loading("Connecting to Telegram…");
     await session.signIn();
     toast.dismiss(id);
@@ -92,6 +97,9 @@
       >
         {copy.action}
       </button>
+      {#if session.error}
+        <p class="text-sm text-destructive" role="alert">{session.error}</p>
+      {/if}
     </form>
   </section>
 {/if}

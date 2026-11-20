@@ -32,6 +32,18 @@ Working agreement for anyone (human or agent) working on `chaff-tg`.
    or `readdir`" — "Bun's implementation of `node:fs` is fast. Use `node:fs` for
    working with directories in Bun."
 
+## Comments — short, and rarely
+
+The CODE carries the meaning. A comment is **1-3 lines at most**, and most functions need none.
+
+- **Delete** comments that narrate what the next line does, numbered step blocks the code already shows, and multi-paragraph or `@param`/`@returns` JSDoc essays.
+- **Keep** only the WHY when it is genuinely surprising: an ordering requirement, a workaround, a version or API fact, a decision that looks wrong without its reason. One line is usually enough.
+- **File headers** are one line naming the module, plus at most one clause naming a non-obvious constraint.
+- **Durable knowledge goes to Sepia**, not into new source prose. Gotchas, vendor behaviour and the long version of "why" belong in memory; the comment keeps only what stops the next person re-breaking the line in front of them.
+- **Never grow a comment** to explain something the code, a test, or a memory already holds. If a comment needs a second paragraph, the paragraph is a memory entry or a doc.
+
+A comment-only pass leaves the code byte-identical. If a change would need the comment to understand it, fix the code instead.
+
    What still imports `node:`, each measured on Bun 1.4.0 rather than assumed:
    directories (`mkdir`/`readdir`; no Bun API) · `existsSync` in `doctor.ts`
    (`Bun.file().exists()` is `false` for a directory, and `.git` may be one) ·

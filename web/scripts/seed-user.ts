@@ -1,12 +1,6 @@
 /**
- * `bun run db:seed` — create the one account this site accepts.
- *
- * Sign-up is disabled in `src/lib/server/auth.ts`, so this is the only way a
- * user ever exists. Idempotent: running it again updates nothing and reports
- * that the account is already there.
- *
- * Reads `CHAFF_APP_EMAIL` / `CHAFF_APP_PASSWORD` from `web/.env` (Bun loads it
- * automatically). Neither value is ever printed.
+ * `bun run db:seed` — the only way a user exists, because sign-up is disabled.
+ * Idempotent: re-running changes nothing. Never prints the credentials.
  */
 import { auth } from '../src/lib/server/auth';
 

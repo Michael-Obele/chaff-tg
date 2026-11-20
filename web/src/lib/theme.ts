@@ -1,7 +1,4 @@
-/**
- * Theme is a class on <html>, applied before first paint by the inline script in
- * app.html so a dark-mode user never sees a white flash.
- */
+/** Applied before first paint by the inline script in `app.html`, so dark mode never flashes white. */
 export type Theme = 'light' | 'dark' | 'system';
 
 const KEY = 'chaff-theme';

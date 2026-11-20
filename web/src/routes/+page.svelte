@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { session } from "#lib/session.svelte";
+  import { adminSession, adminSignOut } from "#lib/auth-client";
   import SignIn from "#lib/components/SignIn.svelte";
   import ChatList from "#lib/components/ChatList.svelte";
   import Review from "#lib/components/Review.svelte";
@@ -8,6 +11,28 @@
 
   let selection = $state<Set<number>>(new Set());
   let mode = $state<"list" | "review">("list");
+
+  /**
+   * Catches what the server redirect cannot: a cookie expired mid-visit, or a
+   * client-side return to `/`. Nothing Telegram renders until this answers.
+   */
+  let gate = $state<"checking" | "open">("checking");
+
+  onMount(async () => {
+    if (!(await adminSession())) {
+      await goto("/login", { replace: true });
+      return;
+    }
+    gate = "open";
+  });
+
+  /** Both doors: the IndexedDB session is the account, the cookie is the gate. */
+  async function signOutAll() {
+    await session.signOut();
+    await adminSignOut();
+    gate = "checking";
+    await goto("/login", { replace: true });
+  }
 
   const chosen = $derived(session.dialogs.filter((c) => selection.has(c.id)));
 
@@ -31,11 +56,13 @@
   <header class="flex items-center justify-between">
     <h1 class="text-xl font-semibold tracking-tight">chaff</h1>
     <div class="flex items-center gap-3">
-      {#if session.me}
+      {#if gate === "open"}
         <span class="text-xs text-muted-foreground">
-          {session.me.username ? `@${session.me.username}` : session.me.name}
-          ·
-          <button class="hover:text-foreground hover:underline" onclick={() => session.signOut()}>
+          {#if session.me}
+            {session.me.username ? `@${session.me.username}` : session.me.name}
+            ·
+          {/if}
+          <button class="hover:text-foreground hover:underline" onclick={signOutAll}>
             sign out
           </button>
         </span>
@@ -44,7 +71,9 @@
     </div>
   </header>
 
-  {#if session.phase === "setup" || session.phase === "signin"}
+  {#if gate === "checking"}
+    <p class="py-16 text-center text-sm text-muted-foreground">Checking your session…</p>
+  {:else if session.phase === "setup" || session.phase === "signin"}
     <SignIn />
   {:else if session.phase === "loading"}
     <p class="py-16 text-center text-sm text-muted-foreground">
@@ -62,7 +91,7 @@
     <Results results={session.results} onDone={reset} />
   {/if}
 
-  {#if session.error && session.phase === "ready"}
+  {#if gate === "open" && session.error && session.phase === "ready"}
     <p class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
       {session.error}
     </p>

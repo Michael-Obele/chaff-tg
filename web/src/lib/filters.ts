@@ -31,7 +31,7 @@ export interface FilterChoice {
 	apply(f: Filters): void;
 }
 
-/** The filter controls the list offers. Each one writes into a fresh copy. */
+/** The filter controls the list offers; each writes into a fresh copy. */
 export const FILTER_CHOICES: FilterChoice[] = [
 	{ key: 'muted', label: 'Muted', apply: (f) => void (f.muted = true) },
 	{ key: 'unmuted', label: 'Not muted', apply: (f) => void (f.muted = false) },
@@ -57,7 +57,7 @@ export function buildFilters(active: string[], keyword: string, exclude: number[
 	return f;
 }
 
-/** Dialogs are the only thing we can leave. Users and bots cannot be. */
+/** Users and bots have no dialog to leave; only chats do. */
 export const LEAVEABLE: ReadonlySet<ChatType> = new Set([
 	'group',
 	'supergroup',
