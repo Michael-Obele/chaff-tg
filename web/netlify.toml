@@ -6,10 +6,10 @@
 # [[redirects]] block — only where to build and what to publish.
 
 [build]
-	command = "bun run build"
-	publish = ".netlify/v1/server"
-	functions = ".netlify/v1/functions"
+command = "bun run build"
+publish = ".netlify/v1/server"
+functions = ".netlify/v1/functions"
 
 [build.environment]
-	# The repo pins Bun 1.4+; an older default drops the lockfile.
-	BUN_VERSION = "1.4.4"
+# The repo pins Bun 1.4+; an older default drops the lockfile.
+BUN_VERSION = "1.4.4"
