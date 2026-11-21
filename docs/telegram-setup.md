@@ -117,18 +117,28 @@ Two layers, one question:
 `/login` is the only page outside the gate, and it forwards to `/` when a session already
 exists.
 
-### Two traps, both measured
+### No URL to configure
 
-- **`trustedOrigins` must be set.** Better Auth validates the `Origin` header of every
-  credentialed POST against `trustedOrigins`, which is **empty by default** — a correct
-  `baseURL` alone is not enough. Without it `POST /api/auth/sign-in/email` answers
-  `{"message":"Invalid origin","code":"INVALID_ORIGIN"}` and the form never succeeds.
-  `web/src/lib/server/auth.ts` sets it from `BETTER_AUTH_URL`.
-- **`svelteKitHandler` compares origins.** The helper mounts `/api/auth` only when the
-  request origin equals `BETTER_AUTH_URL`; when they differ it returns the SPA fallback — a
-  404 that looks like a missing route (`web/AGENTS.md`, trap 3). The hook dispatches on
-  `pathname.startsWith('/api/auth')` instead, so the mount does not depend on an env var
-  being exactly right.
+The auth instance sets **no `baseURL`**. Better Auth then derives it from each incoming
+request and trusts exactly that origin, which is both the right answer and the CSRF check:
+
+| Request                                    | Result                                               |
+| ------------------------------------------ | ---------------------------------------------------- |
+| `sign-in` with `Origin: <own host>`        | 401 for a wrong password — the check runs            |
+| `sign-in` with `Origin: https://evil.test` | 403 `INVALID_ORIGIN`, before credentials are touched |
+| any host — localhost, preview, live domain | all work, because none is written down               |
+
+Measured on this repo. The deleted alternative was an env var that had to name the deployed
+origin exactly, and two ways to get it wrong: a fixed `baseURL` still leaves `trustedOrigins`
+**empty by default** (so every credentialed POST answers `INVALID_ORIGIN`), and
+`svelteKitHandler` mounts `/api/auth` only when the request origin matches the configured
+one — otherwise it returns the SPA fallback, a 404 that looks like a missing route.
+`hooks.server.ts` now dispatches on `pathname.startsWith('/api/auth')`, so the mount does
+not depend on any origin at all.
+
+The cost is one informational `Base URL is not set` line per cold start. It is expected.
+
+Cookies follow `NODE_ENV` instead: `secure` in production, plain on localhost.
 
 ### The admin account
 
@@ -305,7 +315,7 @@ Read the console before reading the code. The first missing line names the layer
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Sent straight to `/login`, no `boot` line                               | The server gate ran before the page: expected for an anonymous visit                                            |
 | `auth › FAILED admin sign-in rejected — Invalid email or password`      | Wrong credentials, or `db:seed` was never run against this database                                             |
-| `auth › FAILED admin sign-in rejected` with `Invalid origin`            | `trustedOrigins` does not include the origin you are on. See section 3                                          |
+| `auth › FAILED admin sign-in rejected` with `Invalid origin`            | A stale server process, or a fixed `baseURL` was reintroduced. Restart; see section 3                           |
 | `/api/auth/*` answers 404 with the SPA shell                            | The mount is by path prefix; if this appears, the hook was replaced — `svelteKitHandler` does an origin check   |
 | No `[tg]` line at all, not even `boot`                                  | The module never ran: stale build, wrong tab, or `TG_TRACE` still `'off'`                                       |
 | `env › browser capabilities { secureContext: false, webCrypto: false }` | You are on a LAN IP over `http`. Open `http://localhost:5173` or serve over `https`                             |
@@ -352,9 +362,9 @@ first place, so the correct response is to leave the account alone until it clea
 
 - [ ] `CHAFF_API_HASH` is **not** in git — `web/.env` is gitignored, `web/.env.example` holds placeholders only.
 - [ ] The build was made **after** the last `.env` edit; `credentialsPresent` is `true` in the UI.
-- [ ] `BETTER_AUTH_URL` and `trustedOrigins` name the deployed origin exactly (`https://…`, no trailing slash).
+- [ ] `BETTER_AUTH_SECRET` and `DATABASE_URL` are set in the deploy; nothing else is required.
+- [ ] `netlify.toml` publishes `build` — a blank page whose scripts 404 means it does not.
 - [ ] The admin gate was tested in a private window: `/` redirects to `/login`, and a wrong password stays there.
-- [ ] The dev server runs on the port named in `BETTER_AUTH_URL`, or `/api/auth/*` 404s.
 - [ ] One account only: sign-up is disabled, `db:seed` created the single user.
 - [ ] "Sign out" was tested and the next visit asks for the admin password and then the phone (IndexedDB really was deleted, and so was the cookie).
 - [ ] The deployment is private. The api hash ships inside the JavaScript, so the gate is not a credential boundary.

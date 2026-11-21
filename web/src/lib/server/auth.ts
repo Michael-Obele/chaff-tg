@@ -14,14 +14,15 @@ function databaseUrl(): string {
 }
 
 /**
- * One account, seeded from env; sign-up is off. `trustedOrigins` is not optional:
- * it defaults to empty, and a correct `baseURL` alone still answers
- * `INVALID_ORIGIN` on every credentialed POST.
+ * One account, seeded from env; sign-up is off.
+ *
+ * No `baseURL`. Better Auth derives it from the incoming request, and trusts
+ * exactly that origin — so localhost, a preview URL and the live domain all work
+ * with no env var to keep in sync. A credentialed POST from any other origin is
+ * still refused, which is the CSRF check that matters.
  */
 export const auth = betterAuth({
 	secret: process.env.BETTER_AUTH_SECRET,
-	baseURL: process.env.BETTER_AUTH_URL,
-	trustedOrigins: [process.env.BETTER_AUTH_URL].filter((url): url is string => Boolean(url)),
 	database: new Pool({ connectionString: databaseUrl() }),
 	emailAndPassword: {
 		enabled: true,

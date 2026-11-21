@@ -30,16 +30,20 @@ Enforcement is in the server hook for the document and in `+page.svelte` for the
 ```bash
 bun install
 bun run check             # svelte-check — 0 errors, 0 warnings
-bun run build             # adapter-netlify → .netlify/functions + assets
+bun run build             # adapter-netlify → build/ + .netlify/v1/functions
 bun run db:migrate        # bunx auth@latest migrate
 bun run db:seed           # creates the one account from CHAFF_APP_EMAIL/PASSWORD
 ```
 
-Run the dev server on the port named in `BETTER_AUTH_URL`, or `/api/auth/*` 404s:
+Any port works now that the auth origin is derived from the request — the port constraint was
+`BETTER_AUTH_URL`, and it is gone:
 
 ```bash
-exec bunx vite dev "$PWD" --port 5173
+cd web && bun run dev -- --port 5173
 ```
+
+Use the project's own vite. `bunx vite dev` can resolve a cached `vite@latest` and run it from the
+repo root, which serves the repo as a bare static root and 404s every route.
 
 Restart it after editing `src/lib/server/auth.ts`: a running instance keeps the old options and
 answers `INVALID_ORIGIN`.
@@ -52,24 +56,36 @@ Bun only. Never npm, yarn or pnpm.
 this table — and the `[tg]` console trace that exists to debug it — is
 [`../docs/telegram-setup.md`](../docs/telegram-setup.md).
 
-| Name                                                    | Reaches        | Notes                                               |
-| ------------------------------------------------------- | -------------- | --------------------------------------------------- |
-| `CHAFF_API_ID`, `CHAFF_API_HASH`                        | the **bundle** | inlined by `vite.config.ts`; the browser needs them |
-| `CHAFF_APP_EMAIL`, `CHAFF_APP_PASSWORD`                 | `db:seed`      | the single account                                  |
-| `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `DATABASE_URL` | the **server** | never bundled                                       |
+| Name                                    | Reaches        | Notes                                               |
+| --------------------------------------- | -------------- | --------------------------------------------------- |
+| `CHAFF_API_ID`, `CHAFF_API_HASH`        | the **bundle** | inlined by `vite.config.ts`; the browser needs them |
+| `CHAFF_APP_EMAIL`, `CHAFF_APP_PASSWORD` | `db:seed`      | the single account                                  |
+| `BETTER_AUTH_SECRET`, `DATABASE_URL`    | the **server** | never bundled                                       |
 
-Three traps, all hit for real:
+There is no `BETTER_AUTH_URL`. Better Auth derives the base URL and the trusted origin from each
+request, so localhost, a preview deploy and the live domain all work unchanged.
+
+Two traps, both hit for real:
 
 1. `loadEnv(mode, '.', 'CHAFF_')` takes a **prefix**, which is why the server secrets need
    `process.loadEnvFile` — the prefix filter excludes them.
 2. `process.loadEnvFile` resolves against `process.cwd()`, the **repo root**. Pass an absolute path or
    it silently loads nothing.
-3. `svelteKitHandler` matches `/api/auth` by comparing the request origin to `BETTER_AUTH_URL`. A
-   wrong port gives a 404 and the HTML fallback, not an auth error. `hooks.server.ts` therefore
-   dispatches on the path prefix instead.
-4. `trustedOrigins` is **empty by default**. Better Auth rejects the `Origin` header of any
-   credentialed POST that is not on the list — a correct `baseURL` alone still yields
-   `INVALID_ORIGIN` and a login form that never succeeds. `auth.ts` sets it from `BETTER_AUTH_URL`.
+
+Two more about Better Auth's origin handling, which the config now avoids rather than satisfies:
+
+- `svelteKitHandler` mounts `/api/auth` only when the request origin equals the configured base
+  URL; on a mismatch it returns the SPA fallback, which reads as a mystery 404. `hooks.server.ts`
+  dispatches on the path prefix instead.
+- `trustedOrigins` defaults to **empty**, so a fixed `baseURL` alone still yields
+  `INVALID_ORIGIN` on every credentialed POST. Leaving `baseURL` unset makes Better Auth trust the
+  request's own origin, which is both the correct origin and the CSRF check.
+
+Expect one `Base URL is not set` warning per cold start. It is informational, not a fault.
+
+`netlify.toml` must publish `build`, not `.netlify/v1/server`: that is where `_app/immutable/*`
+lands. The wrong value ships a shell whose scripts all 404 — a blank site that still answers
+`/api/auth/*`.
 
 A `DATABASE_URL` pasted with wrapping quotes is stripped in `auth.ts`; otherwise `pg` treats the
 quote as part of the host and dials `127.0.0.1`.

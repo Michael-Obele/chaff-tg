@@ -1,5 +1,10 @@
 # Netlify build for the web app. Set the site's base directory to `web`.
 #
+# `publish = "build"` is not a preference: that is where the adapter writes
+# `_app/immutable/*`. Pointing it at `.netlify/v1/server` ships the SSR bundle and
+# no client assets, so every page loads a shell whose scripts all 404 — a blank
+# site that still answers `/api/auth/*`.
+#
 # The adapter emits .netlify/v1/functions/sveltekit-render.mjs, whose own config
 # already declares `path: ["/*"]` and `preferStatic: true`, and writes its
 # cache-control headers into .netlify/v1/config.json. So this file needs no
@@ -7,7 +12,7 @@
 
 [build]
 command = "bun run build"
-publish = ".netlify/v1/server"
+publish = "build"
 functions = ".netlify/v1/functions"
 
 [build.environment]
